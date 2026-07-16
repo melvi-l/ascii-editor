@@ -148,11 +148,11 @@ int main(void) {
     return EXIT_FAILURE;
   };
 
-  stbi_write_png("font_atlas.png", (int)atlas.w, (int)atlas.h,
-                 1, // 1 canal: R8 / alpha
-                 atlas.data,
-                 (int)atlas.w // stride
-  );
+  // stbi_write_png("font_atlas.png", (int)atlas.w, (int)atlas.h,
+  //                1, // 1 canal: R8 / alpha
+  //                atlas.data,
+  //                (int)atlas.w // stride
+  // );
 
   Str text = S(
       "The quick brown fox jumps over the lazy dog\n"

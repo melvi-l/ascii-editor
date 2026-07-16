@@ -13,11 +13,11 @@
 
 #include "lib/math.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "lib/image.h"
+// #define STB_IMAGE_IMPLEMENTATION
+// #include "lib/image.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "lib/image_write.h"
+// #define STB_IMAGE_WRITE_IMPLEMENTATION
+// #include "lib/image_write.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "lib/font.h"
