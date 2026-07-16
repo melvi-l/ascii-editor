@@ -12,9 +12,13 @@ COMMON_LIBS="-lm -lglfw -lvulkan"
 mkdir -p "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/shaders"
 
-slangc "$SRC_DIR/shaders/text.slang" -target spirv -profile spirv_1_4 \
-  -emit-spirv-directly -fvk-use-entrypoint-name \
-  -entry vertMain -entry fragMain -o "$BUILD_DIR/shaders/text.spv"
+for shader in "$SRC_DIR"/shaders/*.slang; do
+  [ -e "$shader" ] || continue
+  out="$BUILD_DIR/shaders/$(basename "${shader%.slang}").spv"
+  slangc "$shader" -target spirv -profile spirv_1_4 \
+    -emit-spirv-directly -fvk-use-entrypoint-name \
+    -entry vertMain -entry fragMain -o "$out"
+done
 
 case "$MODE" in
   debug)
