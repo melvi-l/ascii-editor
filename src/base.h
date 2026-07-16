@@ -638,5 +638,27 @@ bool read_file(Arena *arena, Str path, Str *out) {
   return true;
 }
 
+// @timer
+typedef struct {
+  f64 last;
+  f64 interval;
+} Timer;
+
+bool timer_tick(Timer *timer) {
+  f64 now = now_seconds();
+
+  if (timer->last == 0.0) {
+    timer->last = now;
+    return false;
+  }
+
+  if (now - timer->last >= timer->interval) {
+    timer->last = now;
+    return true;
+  }
+
+  return false;
+}
+
 #endif // BASE_IMPLEMENTATION
 #endif // BASE_H

@@ -1,7 +1,7 @@
 #include "main.h"
-#include <stdio.h>
 
-#include "vulkan.c"
+#include "plat.c"
+#include "rd.c"
 
 #define TV(x, y, r, g, b, u, v)                                                \
   ((TextVertex){.position = {.X = x, .Y = y},                                  \
@@ -9,50 +9,6 @@
                 .uv = {.U = u, .V = v}})
 
 #define BTV(x, y, u, v) TV(x, y, 1, 1, 1, u, v)
-
-static void glfw_resize(GLFWwindow *window, int width, int height) {
-
-  printf("GLFW Resize (width=%4i; height=%4i)\n", width, height);
-  f64 start_time = now_seconds();
-  Application *app = glfwGetWindowUserPointer(window);
-
-  vk_resize(app);
-
-  f64 end_time = now_seconds();
-  f64 elapsed = end_time - start_time;
-  printf("resizing take %.2fms.\n", elapsed * 1000);
-}
-
-static int glfw_init(Application *app) {
-  if (!glfwInit()) {
-    fprintf(stderr, "Failed to initialize GLFW\n");
-    return -1;
-  }
-
-  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-
-  app->window = glfwCreateWindow(1000, 1000, "Vulkan", NULL, NULL);
-
-  glfwSetWindowUserPointer(app->window, app);
-  glfwSetFramebufferSizeCallback(app->window, glfw_resize);
-
-  if (app->window == NULL) {
-    fprintf(stderr, "Failed to create GLFW window\n");
-    return -1;
-  }
-
-  printf("GLFW window created\n");
-  int win_w, win_h;
-  int fb_w, fb_h;
-
-  glfwGetWindowSize(app->window, &win_w, &win_h);
-  glfwGetFramebufferSize(app->window, &fb_w, &fb_h);
-
-  printf("window size: %d x %d\n", win_w, win_h);
-  printf("framebuffer size: %d x %d\n", fb_w, fb_h);
-
-  return 0;
-}
 
 int init_atlas(Arena *arena, Str font_path, Atlas *a);
 
@@ -125,7 +81,7 @@ int compute_frame(Application *app, Atlas *atlas) {
 
 int draw_frame(Application *app) {
   VkCommandBuffer current_command_buffer = NULL;
-  i32 image_index = vk_begin_rendering(app, &current_command_buffer);
+  i32 image_index = rd_begin_rendering(app, &current_command_buffer);
   if (image_index < 0)
     perror("failed to begin rendering");
 
@@ -162,36 +118,39 @@ int draw_frame(Application *app) {
                      0);
   }
 
-  vk_end_rendering(app, &current_command_buffer, (u32)image_index);
+  rd_end_rendering(app, &current_command_buffer, (u32)image_index);
 
   return 0;
 }
 
 // @main loop
-static void main_loop(Application *app, Atlas *atlas) {
+void main_loop(Application *app, Atlas *atlas) {
   (void)atlas;
-  char title[64];
-  f64 last_time = now_seconds();
-  uint32_t frame_count = 0;
-  while (!glfwWindowShouldClose(app->window)) {
-    glfwPollEvents();
+  Timer second_timer = {.interval = 1.};
+  while (!plat_should_close(&app->plat)) {
+    plat_poll_events();
     draw_frame(app);
-    frame_count++;
-
-    f64 current_time = now_seconds();
-    f64 elapsed = current_time - last_time;
-
-    if (elapsed >= 1.0) {
-      f64 fps = (f64)frame_count / elapsed;
-
+    f64 fps = plat_compute_fps();
+    if (timer_tick(&second_timer)) {
       printf("FPS: %.1f\n", fps);
-
-      frame_count = 0;
-      last_time = current_time;
-      snprintf(title, sizeof(title), "Vulkan - FPS: %.1f", fps);
-      glfwSetWindowTitle(app->window, title);
     }
   }
+}
+
+void resize(u32 width, u32 height, void *user_data) {
+  Application *app = user_data;
+  if (app == NULL)
+    return;
+
+  f64 start_time = now_seconds();
+
+  app->w = width;
+  app->h = height;
+  rd_resize(app);
+
+  f64 end_time = now_seconds();
+  f64 elapsed = end_time - start_time;
+  printf("resizing take %.2fms.\n", elapsed * 1000);
 }
 
 // @main
@@ -201,7 +160,7 @@ int main(void) {
       .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
   };
 
-  if (glfw_init(&app) != 0) {
+  if (plat_init(&app.plat, resize, &app) != 0) {
     return EXIT_FAILURE;
   }
 
@@ -212,54 +171,71 @@ int main(void) {
     return EXIT_FAILURE;
   };
 
-  int w, h;
-  glfwGetFramebufferSize(app.window, &w, &h);
+  plat_get_window_size(&app.plat, &app.w, &app.h);
   app.editor_viewport = (Viewport){.x = 64,
                                    .y = 64,
-                                   .w = (u32)w - 64 * 2,
-                                   .h = (u32)h - 64 * 2,
+                                   .w = app.w - 64 * 2,
+                                   .h = app.h - 64 * 2,
                                    .padding_h = 32,
                                    .padding_v = 32};
 
   app.editor_cursor = (Cursor){.col = 0, .row = 0};
 
-  app.editor_text = S(
-      "The quick brown fox jumps over the lazy dog\n"
-      "?[{()}]!$<-/#%\\_>`~&:'@^\";|*\n"
-      "Porro omnis perspiciatis qui perspiciatis repudiandae. Temporibus iusto "
-      "doloribus distinctio. Fuga sint odio nobis culpa aliquam. Non aut aut "
-      "illum.\n"
-      "Alias occaecati velit aliquid corrupti. Omnis provident sunt laudantium "
-      "impedit. Quia dicta illum et.\n"
-      "Fuga ullam laudantium consequatur tenetur molestiae. Enim omnis debitis "
-      "facere veniam nobis magni. Quo et totam magnam. Tenetur aut ipsum "
-      "praesentium. Placeat est omnis laborum vero ducimus et repellendus et.\n"
-      "Dicta enim qui doloribus provident ut voluptatum unde. Commodi aut "
-      "voluptatibus non consequatur occaecati qui. Dicta minima qui voluptates "
-      "cupiditate numquam ad debitis. Culpa ut itaque explicabo deserunt "
-      "laboriosam deleniti aut.\n"
-      "Quibusdam consectetur nam perferendis aut. Delectus dolor aut assumenda "
-      "nemo nisi et. Eum magni impedit blanditiis est et dolores soluta. Ut "
-      "harum dolores non suscipit et aut. Fuga facere et quo. Error fuga quo "
-      "nostrum.");
+  app.editor_text =
+      S("The quick brown fox jumps over the lazy dog\n"
+        "?[{()}]!$<-/#%\\_>`~&:'@^\";|*\n"
+        "Porro omnis perspiciatis qui perspiciatis repudiandae. Temporibus "
+        "iusto "
+        "doloribus distinctio. Fuga sint odio nobis culpa aliquam. Non aut aut "
+        "illum.\n"
+        "Alias occaecati velit aliquid corrupti. Omnis provident sunt "
+        "laudantium "
+        "impedit. Quia dicta illum et.\n"
+        "Fuga ullam laudantium consequatur tenetur molestiae. Enim omnis "
+        "debitis "
+        "facere veniam nobis magni. Quo et totam magnam. Tenetur aut ipsum "
+        "praesentium. Placeat est omnis laborum vero ducimus et repellendus "
+        "et.\n"
+        "Dicta enim qui doloribus provident ut voluptatum unde. Commodi aut "
+        "voluptatibus non consequatur occaecati qui. Dicta minima qui "
+        "voluptates "
+        "cupiditate numquam ad debitis. Culpa ut itaque explicabo deserunt "
+        "laboriosam deleniti aut.\n"
+        "Quibusdam consectetur nam perferendis aut. Delectus dolor aut "
+        "assumenda "
+        "nemo nisi et. Eum magni impedit blanditiis est et dolores soluta. Ut "
+        "harum dolores non suscipit et aut. Fuga facere et quo. Error fuga quo "
+        "nostrum.");
 
   // move in loop, update dirty host visible buffer
   compute_frame(&app, &atlas);
 
-  if (vk_init(&app) != 0) {
-    vk_cleanup(&app);
-    return EXIT_FAILURE;
+  if (!rd_create_instance(&app)) {
+    goto cleanup;
   }
 
-  vk_upload_bitmap(&app, atlas.data, atlas.w, atlas.h);
+  if (!plat_create_vulkan_surface(app.plat.window, app.instance, NULL,
+                                  &app.surface)) {
+    goto cleanup;
+  };
 
-  vk_create_pipeline(&app);
-  vk_create_descriptor_set(&app);
+  if (!rd_init(&app)) {
+    goto cleanup;
+  }
+
+  rd_upload_bitmap(&app, atlas.data, atlas.w, atlas.h);
+
+  rd_create_pipeline(&app);
+  rd_create_descriptor_set(&app);
 
   main_loop(&app, &atlas);
-  vk_cleanup(&app);
+  rd_cleanup(&app);
 
   return EXIT_SUCCESS;
+
+cleanup:
+  rd_cleanup(&app);
+  return EXIT_FAILURE;
 }
 
 // @font-atlas

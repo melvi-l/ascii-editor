@@ -8,8 +8,7 @@
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include "plat.h"
 
 #include "lib/math.h"
 
@@ -51,8 +50,9 @@ typedef struct Application {
   Viewport editor_viewport;
   Cursor editor_cursor;
 
-  // plat
-  GLFWwindow *window;
+  u32 w, h;
+
+  Platform plat;
 
   Arena *vulkan_arena;
   Arena *scratch_arena;

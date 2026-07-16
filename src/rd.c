@@ -1,4 +1,5 @@
-#include "vulkan.h"
+#include "rd.h"
+#include "main.h"
 #include <vulkan/vulkan_core.h>
 
 #define MAX_GLYPH (1 << 14)
@@ -18,94 +19,51 @@ char const *validation_layer_names[] = {};
 const u32 validation_layer_count = 0;
 #endif
 
-static int vk_init(Application *app) {
-  app->instance = VK_NULL_HANDLE;
-  app->surface = VK_NULL_HANDLE;
-  app->inflight_count = MAX_FRAMES_IN_FLIGHT;
-  app->frame_index = 0;
-  app->physical_device = VK_NULL_HANDLE;
-  app->device = VK_NULL_HANDLE;
+static bool rd_create_instance(Application *app) {
+  ArenaTemp scratch = arena_temp_begin(app->scratch_arena);
+  u32 extension_count;
+  const char **extension_names = NULL;
+  if (!get_extensions(scratch.arena, &extension_count, &extension_names)) {
+    fprintf(stderr, "Vulkan error: failed to resolve instance extensions\n");
+    rd_cleanup(app);
+    return false;
+  }
+
+  u32 layer_count;
+  const char **layer_names = NULL;
+  if (!get_layers(scratch.arena, &layer_count, &layer_names)) {
+    fprintf(stderr, "Vulkan error: failed to resolve validation layers\n");
+    rd_cleanup(app);
+    return false;
+  }
+  const VkApplicationInfo appInfo = {
+      .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+      .pApplicationName = "Hello Triangle",
+      .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+      .pEngineName = "No Engine",
+      .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+      .apiVersion = VK_API_VERSION_1_3};
+
+  const VkInstanceCreateInfo createInfo = {
+      .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+      .pApplicationInfo = &appInfo,
+      .enabledExtensionCount = extension_count,
+      .ppEnabledExtensionNames = extension_names,
+      .enabledLayerCount = layer_count,
+      .ppEnabledLayerNames = layer_names,
+  };
+
+  VKTRY(vkCreateInstance(&createInfo, NULL, &app->instance),
+        "Vulkan error: failed to create instance");
+
+  printf("vk::Instance created\n");
+  arena_temp_end(scratch);
+  return true;
+}
+
+static bool rd_init(Application *app) {
   app->graphic_queue_index = UINT32_MAX;
-  app->graphic_queue = VK_NULL_HANDLE;
-  app->swapchain = VK_NULL_HANDLE;
-  app->swapchain_images_count = 0;
-  app->swapchain_images = VK_NULL_HANDLE;
-  app->swapchain_image_views = VK_NULL_HANDLE;
-  app->pipeline = VK_NULL_HANDLE;
-  app->descriptor_set_layout = VK_NULL_HANDLE;
-  app->descriptor_pool = VK_NULL_HANDLE;
-  app->descriptor_sets = NULL;
-  app->depth_image = VK_NULL_HANDLE;
-  app->depth_memory = VK_NULL_HANDLE;
-  app->depth_view = VK_NULL_HANDLE;
-  app->descriptor_set_layout = VK_NULL_HANDLE;
-  app->descriptor_pool = VK_NULL_HANDLE;
-  app->descriptor_pool = NULL;
-  app->texture_view = VK_NULL_HANDLE;
-  app->texture_sampler = VK_NULL_HANDLE;
-  app->texture_image = VK_NULL_HANDLE;
-  app->texture_memory = VK_NULL_HANDLE;
-  app->geometry_buffer = VK_NULL_HANDLE;
-  app->geometry_memory = VK_NULL_HANDLE;
-  app->geometry_buffer = 0;
-  app->geometry_memory = 0;
-  app->uniform_buffers = VK_NULL_HANDLE;
-  app->uniform_memories = VK_NULL_HANDLE;
-  app->uniform_buffers_mapped = NULL;
-  app->graphic_command_pool = VK_NULL_HANDLE;
-  app->graphic_command_buffers = NULL;
-  app->image_available_semas = NULL;
-  app->render_finish_semas = NULL;
-  app->draw_fences = NULL;
-
-  // @instance
-  {
-    ArenaTemp scratch = arena_temp_begin(app->scratch_arena);
-    u32 extension_count;
-    const char **extension_names = NULL;
-    if (!get_extensions(scratch.arena, &extension_count, &extension_names)) {
-      fprintf(stderr, "Vulkan error: failed to resolve instance extensions\n");
-      vk_cleanup(app);
-      return -1;
-    }
-
-    u32 layer_count;
-    const char **layer_names = NULL;
-    if (!get_layers(scratch.arena, &layer_count, &layer_names)) {
-      fprintf(stderr, "Vulkan error: failed to resolve validation layers\n");
-      vk_cleanup(app);
-      return -1;
-    }
-    const VkApplicationInfo appInfo = {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "Hello Triangle",
-        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-        .pEngineName = "No Engine",
-        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-        .apiVersion = VK_API_VERSION_1_3};
-
-    const VkInstanceCreateInfo createInfo = {
-        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pApplicationInfo = &appInfo,
-        .enabledExtensionCount = extension_count,
-        .ppEnabledExtensionNames = extension_names,
-        .enabledLayerCount = layer_count,
-        .ppEnabledLayerNames = layer_names,
-    };
-
-    VKTRY(vkCreateInstance(&createInfo, NULL, &app->instance),
-          "Vulkan error: failed to create instance");
-
-    printf("vk::Instance created\n");
-    arena_temp_end(scratch);
-  }
-  // @surface
-  {
-    VKTRY(glfwCreateWindowSurface(app->instance, app->window, NULL,
-                                  &app->surface),
-          "GLFW error: failed to create a window surface");
-    printf("vk::Surface created\n");
-  }
+  app->inflight_count = MAX_FRAMES_IN_FLIGHT;
 
   // @physical device
   VkPhysicalDeviceVulkan11Features vulkan11_features = {
@@ -148,8 +106,8 @@ static int vk_init(Application *app) {
                                    &physical_device_properties);
     if (physical_device_properties.properties.apiVersion < VK_API_VERSION_1_3) {
       fprintf(stderr, "Vulkan error: physical device do not support 1.3.");
-      vk_cleanup(app);
-      return -1;
+      rd_cleanup(app);
+      return false;
     }
 
     // verify graphic queue
@@ -179,8 +137,8 @@ static int vk_init(Application *app) {
     if (app->graphic_queue_index == UINT32_MAX) {
       fprintf(stderr,
               "Vulkan error: physical device does not support graphic queue\n");
-      vk_cleanup(app);
-      return -1;
+      rd_cleanup(app);
+      return false;
     }
 
     // transfer queue index
@@ -217,8 +175,8 @@ static int vk_init(Application *app) {
     if (!supports_swapchain) {
       fprintf(stderr,
               "Vulkan error: physical device does not support swapchain\n");
-      vk_cleanup(app);
-      return -1;
+      rd_cleanup(app);
+      return false;
     }
 
     // verify dynamic rendering feature
@@ -228,8 +186,8 @@ static int vk_init(Application *app) {
         !extended_dynamic_state_features.extendedDynamicState) {
       fprintf(stderr,
               "Vulkan error: physical device does not dynamic rendering\n");
-      vk_cleanup(app);
-      return -1;
+      rd_cleanup(app);
+      return false;
     }
 
     printf("vk::PhysicalDevice created\n");
@@ -358,12 +316,12 @@ static int vk_init(Application *app) {
     memcpy(geometry_array + app->vertex_offset, vertices, vertex_size);
     memcpy(geometry_array + app->index_offset, indices, index_size);
 
-    if (upload_device_local_array(app, geometry_array, geometry_size,
-                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                  &app->geometry_buffer,
-                                  &app->geometry_memory) != 0) {
-      return -1;
+    if (!upload_device_local_array(app, geometry_array, geometry_size,
+                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                   &app->geometry_buffer,
+                                   &app->geometry_memory)) {
+      return false;
     }
   }
 
@@ -426,10 +384,10 @@ static int vk_init(Application *app) {
     }
   }
 
-  return 0;
+  return true;
 }
 
-int swapchain_init(Arena *arena, Application *app) {
+bool swapchain_init(Arena *arena, Application *app) {
 
   VkSurfaceCapabilitiesKHR capabilities;
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(app->physical_device, app->surface,
@@ -437,14 +395,14 @@ int swapchain_init(Arena *arena, Application *app) {
   app->swap_extent = capabilities.currentExtent;
 
   if (app->swap_extent.width == UINT32_MAX) {
-    int w, h;
-    glfwGetFramebufferSize(app->window, &w, &h);
     app->swap_extent = (VkExtent2D){
-        .width = clamp((u32)w, capabilities.minImageExtent.width,
+        .width = clamp((u32)app->w, capabilities.minImageExtent.width,
                        capabilities.maxImageExtent.width),
-        .height = clamp((u32)h, capabilities.minImageExtent.height,
+        .height = clamp((u32)app->h, capabilities.minImageExtent.height,
                         capabilities.maxImageExtent.height),
     };
+  } else {
+    abort();
   }
 
   u32 swap_image_count = max(3, capabilities.minImageCount);
@@ -458,8 +416,8 @@ int swapchain_init(Arena *arena, Application *app) {
                                        &formats_count, NULL);
   if (formats_count == 0) {
     fprintf(stderr, "Vulkan error: no present mode available\n");
-    vk_cleanup(app);
-    return -1;
+    rd_cleanup(app);
+    return false;
   }
   VkSurfaceFormatKHR *available_formats =
       ARENA_PUSH_ARRAY(arena, formats_count, VkSurfaceFormatKHR);
@@ -481,8 +439,8 @@ int swapchain_init(Arena *arena, Application *app) {
                                             &present_modes_count, NULL);
   if (present_modes_count == 0) {
     fprintf(stderr, "Vulkan error: no present mode available\n");
-    vk_cleanup(app);
-    return -1;
+    rd_cleanup(app);
+    return false;
   }
   VkPresentModeKHR *available_present_modes =
       ARENA_PUSH_ARRAY(arena, present_modes_count, VkPresentModeKHR);
@@ -535,8 +493,8 @@ int swapchain_init(Arena *arena, Application *app) {
 
   if (app->swapchain_images_count == 0) {
     fprintf(stderr, "Vulkan error: swapchain is empty\n");
-    vk_cleanup(app);
-    return -1;
+    rd_cleanup(app);
+    return false;
   }
 
   app->swapchain_image_views = ARENA_PUSH_ARRAY(
@@ -568,10 +526,10 @@ int swapchain_init(Arena *arena, Application *app) {
           "Vulkan error: failed to created image view for a swapchain image");
   }
 
-  return 0;
+  return true;
 }
 
-int swapchain_cleanup(Application *app) {
+bool swapchain_cleanup(Application *app) {
   if (app->swapchain_image_views != VK_NULL_HANDLE) {
     for (u32 i = 0; i < app->swapchain_images_count; i++) {
       printf("%i => %p\n", i, (void *)app->swapchain_image_views[i]);
@@ -587,22 +545,22 @@ int swapchain_cleanup(Application *app) {
     app->swapchain = VK_NULL_HANDLE;
   }
 
-  return 0;
+  return true;
 }
 
-int depth_buffer_init(Application *app) {
+bool depth_buffer_init(Application *app) {
   VkFormat format;
   if (!find_depth_format(app, &format)) {
     fprintf(stderr,
             "Unable to find a supported format compatible avec expectation\n");
     return 1;
   }
-  if (create_image(app, app->swap_extent.width, app->swap_extent.height, format,
-                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_TILING_OPTIMAL,
-                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                   VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &app->depth_image,
-                   &app->depth_memory) != 0) {
-    fprintf(stderr, "Unable to find a create a image for depth buffer\n");
+  if (!create_image(
+          app, app->w, app->h, format, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+          VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &app->depth_image,
+          &app->depth_memory)) {
+    fprintf(stderr, "Unable to create a image for depth buffer\n");
     return 1;
   };
   VKTRY(vkCreateImageView(
@@ -619,10 +577,10 @@ int depth_buffer_init(Application *app) {
                                      .layerCount = 1}},
             NULL, &app->depth_view),
         "Vulkan error: Failed to create image view for depth buffer");
-  return 0;
+  return true;
 }
 
-int depth_buffer_cleanup(Application *app) {
+bool depth_buffer_cleanup(Application *app) {
   if (app->depth_image != VK_NULL_HANDLE)
     vkDestroyImage(app->device, app->depth_image, NULL);
   if (app->depth_memory != VK_NULL_HANDLE)
@@ -630,11 +588,11 @@ int depth_buffer_cleanup(Application *app) {
   if (app->depth_view != VK_NULL_HANDLE)
     vkDestroyImageView(app->device, app->depth_view, NULL);
 
-  return 0;
+  return true;
 }
 
 // @clean up
-static void vk_cleanup(Application *app) {
+static void rd_cleanup(Application *app) {
   vkDeviceWaitIdle(app->device);
 
   if (app->image_available_semas != NULL) {
@@ -715,12 +673,6 @@ static void vk_cleanup(Application *app) {
 
   arena_destroy(app->vulkan_arena);
   arena_destroy(app->scratch_arena);
-
-  if (app->window != NULL) {
-    glfwDestroyWindow(app->window);
-    app->window = NULL;
-  }
-  glfwTerminate();
 }
 
 void transition_image_layout(
@@ -755,7 +707,7 @@ void transition_image_layout(
   vkCmdPipelineBarrier2(command_buffer, &dependency_info);
 }
 
-int vk_resize(Application *app) {
+bool rd_resize(Application *app) {
   vkDeviceWaitIdle(app->device);
 
   swapchain_cleanup(app);
@@ -766,10 +718,10 @@ int vk_resize(Application *app) {
   depth_buffer_init(app);
 
   arena_temp_end(temp);
-  return 0;
+  return true;
 }
 
-int vk_create_pipeline(Application *app) {
+bool rd_create_pipeline(Application *app) {
   ArenaTemp scratch = arena_temp_begin(app->scratch_arena);
 
   Str shader_code = {0};
@@ -926,10 +878,10 @@ int vk_create_pipeline(Application *app) {
   vkDestroyShaderModule(app->device, shader_module, NULL);
   arena_temp_end(scratch);
 
-  return 0;
+  return true;
 }
 
-int vk_create_descriptor_set(Application *app) {
+bool rd_create_descriptor_set(Application *app) {
   ArenaTemp tmp = arena_temp_begin(app->scratch_arena);
   // pool
   printf("pool\n");
@@ -996,19 +948,19 @@ int vk_create_descriptor_set(Application *app) {
     vkUpdateDescriptorSets(app->device, 2, descriptor_write, 0, NULL);
   }
   arena_temp_end(tmp);
-  return 0;
+  return true;
 }
 
-int vk_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height) {
+bool rd_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height) {
   VkDeviceSize image_size = width * height;
   VkBuffer staging_buffer;
   VkDeviceMemory staging_memory;
-  if (create_buffer(app, image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &staging_buffer,
-                    &staging_memory) != 0) {
-    return -1;
+  if (!create_buffer(app, image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &staging_buffer,
+                     &staging_memory)) {
+    return false;
   }
   void *data;
   VKTRY(vkMapMemory(app->device, staging_memory, 0, image_size, 0, &data),
@@ -1017,12 +969,13 @@ int vk_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height) {
   memcpy(data, bitmap, image_size);
   vkUnmapMemory(app->device, staging_memory);
 
-  if (create_image(app, width, height, VK_FORMAT_R8_UNORM,
-                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_TILING_OPTIMAL,
-                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                   VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &app->texture_image,
-                   &app->texture_memory) != 0) {
-    return -1;
+  if (!create_image(
+          app, width, height, VK_FORMAT_R8_UNORM,
+          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_TILING_OPTIMAL,
+          VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+          VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &app->texture_image,
+          &app->texture_memory)) {
+    return false;
   }
 
   VKTRY(vkBeginCommandBuffer(
@@ -1146,23 +1099,20 @@ int vk_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height) {
   vkFreeMemory(app->device, staging_memory, NULL);
 
   // view
-  if (vkCreateImageView(
-          app->device,
-          &(VkImageViewCreateInfo){
-              .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-              .image = app->texture_image,
-              .viewType = VK_IMAGE_VIEW_TYPE_2D,
-              .format = VK_FORMAT_R8_UNORM,
-              .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                                   .baseMipLevel = 0,
-                                   .levelCount = 1,
-                                   .baseArrayLayer = 0,
-                                   .layerCount = 1}},
-          NULL, &app->texture_view) != 0) {
-
-    fprintf(stderr, "Vulkan error: Unable to create an image\n");
-    return 1;
-  };
+  VKTRY(vkCreateImageView(
+            app->device,
+            &(VkImageViewCreateInfo){
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .image = app->texture_image,
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .format = VK_FORMAT_R8_UNORM,
+                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                     .baseMipLevel = 0,
+                                     .levelCount = 1,
+                                     .baseArrayLayer = 0,
+                                     .layerCount = 1}},
+            NULL, &app->texture_view),
+        "Vulkan error: Unable to create an image");
 
   // sampler
   VkPhysicalDeviceProperties2 properties = {
@@ -1183,7 +1133,7 @@ int vk_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height) {
           .compareEnable = VK_FALSE,
           .compareOp = VK_COMPARE_OP_ALWAYS},
       NULL, &app->texture_sampler);
-  return 0;
+  return true;
 }
 
 // @extensions
@@ -1201,14 +1151,14 @@ bool has_extension(u32 actual_count, VkExtensionProperties *actual_props,
 bool get_extensions(Arena *arena, u32 *extension_count,
                     const char ***extension_names) {
   // actual ext of vk
-  u32 vk_available_extension_count = 0;
+  u32 rd_available_extension_count = 0;
 
-  vkEnumerateInstanceExtensionProperties(NULL, &vk_available_extension_count,
+  vkEnumerateInstanceExtensionProperties(NULL, &rd_available_extension_count,
                                          NULL);
-  VkExtensionProperties *vk_available_extension_properties = ARENA_PUSH_ARRAY(
-      arena, vk_available_extension_count, VkExtensionProperties);
-  vkEnumerateInstanceExtensionProperties(NULL, &vk_available_extension_count,
-                                         vk_available_extension_properties);
+  VkExtensionProperties *rd_available_extension_properties = ARENA_PUSH_ARRAY(
+      arena, rd_available_extension_count, VkExtensionProperties);
+  vkEnumerateInstanceExtensionProperties(NULL, &rd_available_extension_count,
+                                         rd_available_extension_properties);
 
   // expected ext by glfw
   u32 glfw_extension_count = 0; // TODO change
@@ -1219,8 +1169,8 @@ bool get_extensions(Arena *arena, u32 *extension_count,
     return false;
   }
   for (u32 i = 0; i < glfw_extension_count; ++i) {
-    if (!has_extension(vk_available_extension_count,
-                       vk_available_extension_properties,
+    if (!has_extension(rd_available_extension_count,
+                       rd_available_extension_properties,
                        (glfw_extension_names)[i])) {
       return false;
     }
@@ -1230,8 +1180,8 @@ bool get_extensions(Arena *arena, u32 *extension_count,
   int extra_extension_count = 0;
   if (is_validation_enabled) {
     extra_extension_count++;
-    if (!has_extension(vk_available_extension_count,
-                       vk_available_extension_properties,
+    if (!has_extension(rd_available_extension_count,
+                       rd_available_extension_properties,
                        VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
       return false;
     }
@@ -1304,14 +1254,14 @@ bool get_layers(Arena *arena, u32 *layer_count, const char ***layer_names) {
            sizeof(validation_layer_names) * validation_layer_count);
   }
 
-  u32 vk_layer_count;
-  vkEnumerateInstanceLayerProperties(&vk_layer_count, NULL);
-  VkLayerProperties *vk_layer_properties =
-      ARENA_PUSH_ARRAY(arena, vk_layer_count, VkLayerProperties);
-  vkEnumerateInstanceLayerProperties(&vk_layer_count, vk_layer_properties);
+  u32 rd_layer_count;
+  vkEnumerateInstanceLayerProperties(&rd_layer_count, NULL);
+  VkLayerProperties *rd_layer_properties =
+      ARENA_PUSH_ARRAY(arena, rd_layer_count, VkLayerProperties);
+  vkEnumerateInstanceLayerProperties(&rd_layer_count, rd_layer_properties);
 
   for (u32 i = 0; i < required_layer_count; i++) {
-    if (!has_layer(vk_layer_count, vk_layer_properties,
+    if (!has_layer(rd_layer_count, rd_layer_properties,
                    required_layer_names[i])) {
       return false;
     }
@@ -1336,13 +1286,13 @@ i32 find_memory_type(Application *app, u32 type_filter,
     }
   }
 
-  return -1;
+  return false;
 }
-int create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
-                  VkMemoryPropertyFlags properties, VkSharingMode sharing_mode,
-                  u32 queue_family_index_count,
-                  const u32 *p_queue_family_indices, VkBuffer *buffer,
-                  VkDeviceMemory *memory) {
+bool create_buffer(Application *app, VkDeviceSize size,
+                   VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                   VkSharingMode sharing_mode, u32 queue_family_index_count,
+                   const u32 *p_queue_family_indices, VkBuffer *buffer,
+                   VkDeviceMemory *memory) {
 
   VkBufferCreateInfo buffer_info = {
       .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1359,7 +1309,7 @@ int create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
       find_memory_type(app, memory_requirements.memoryTypeBits, properties);
   if (memory_type_index < 0) {
     fprintf(stderr, "Unable to find adequate memory type index.\n");
-    return -1;
+    return false;
   }
   VkMemoryAllocateInfo memory_allocate_info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -1369,10 +1319,10 @@ int create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
         "Vulkan error: Failed to allocate vertex buffer memory");
   VKTRY(vkBindBufferMemory(app->device, *buffer, *memory, 0),
         "Vulkan error: unable to bind buffer memory");
-  return 0;
+  return true;
 }
-int copy_buffer(VkQueue queue, VkCommandBuffer cmd, VkBuffer *src,
-                VkBuffer *dst, VkDeviceSize size) {
+bool copy_buffer(VkQueue queue, VkCommandBuffer cmd, VkBuffer *src,
+                 VkBuffer *dst, VkDeviceSize size) {
   VKTRY(vkBeginCommandBuffer(
             cmd,
             &(VkCommandBufferBeginInfo){
@@ -1401,20 +1351,20 @@ int copy_buffer(VkQueue queue, VkCommandBuffer cmd, VkBuffer *src,
         "Vulkan error: Failed to submit transfer command buffer");
 
   VKTRY(vkQueueWaitIdle(queue), "Vulkan error: Failed to wait transfer queue");
-  return 0;
+  return true;
 }
-int upload_device_local_array(Application *app, void *array,
-                              VkDeviceSize buffer_size,
-                              VkBufferUsageFlags additional_usage,
-                              VkBuffer *buffer, VkDeviceMemory *memory) {
+bool upload_device_local_array(Application *app, void *array,
+                               VkDeviceSize buffer_size,
+                               VkBufferUsageFlags additional_usage,
+                               VkBuffer *buffer, VkDeviceMemory *memory) {
   VkBuffer staging_buffer = VK_NULL_HANDLE;
   VkDeviceMemory staging_memory = VK_NULL_HANDLE;
-  if (create_buffer(app, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &staging_buffer,
-                    &staging_memory) != 0) {
-    return -1;
+  if (!create_buffer(app, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     VK_SHARING_MODE_EXCLUSIVE, 0, NULL, &staging_buffer,
+                     &staging_memory)) {
+    return false;
   };
 
   // RAM -> HOST_VISIBLE
@@ -1436,31 +1386,31 @@ int upload_device_local_array(Application *app, void *array,
         (u32[2]){app->graphic_queue_index, app->transfer_queue_index};
   }
 
-  if (create_buffer(app, buffer_size,
-                    VK_BUFFER_USAGE_TRANSFER_DST_BIT | additional_usage,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sharing_mode,
-                    queue_family_count, queue_families, buffer, memory) != 0) {
-    return -1;
+  if (!create_buffer(app, buffer_size,
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT | additional_usage,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sharing_mode,
+                     queue_family_count, queue_families, buffer, memory)) {
+    return false;
   };
 
   // HOST_VISIBLE -> DEVICE_LOCAL
-  if (copy_buffer(app->transfer_queue, app->transfer_command_buffer,
-                  &staging_buffer, buffer, buffer_size) != 0) {
-    return -1;
+  if (!copy_buffer(app->transfer_queue, app->transfer_command_buffer,
+                   &staging_buffer, buffer, buffer_size)) {
+    return false;
   };
 
   vkDestroyBuffer(app->device, staging_buffer, NULL);
   vkFreeMemory(app->device, staging_memory, NULL);
-  return 0;
+  return true;
 }
 
 // @vertex
-int create_image(Application *app, u32 width, u32 height, VkFormat format,
-                 VkMemoryPropertyFlags properties, VkImageTiling tiling,
-                 VkImageUsageFlags usage, VkSharingMode sharing_mode,
-                 u32 queue_family_index_count,
-                 const u32 *p_queue_family_indices, VkImage *image,
-                 VkDeviceMemory *memory) {
+bool create_image(Application *app, u32 width, u32 height, VkFormat format,
+                  VkMemoryPropertyFlags properties, VkImageTiling tiling,
+                  VkImageUsageFlags usage, VkSharingMode sharing_mode,
+                  u32 queue_family_index_count,
+                  const u32 *p_queue_family_indices, VkImage *image,
+                  VkDeviceMemory *memory) {
   VkImageCreateInfo image_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
       .imageType = VK_IMAGE_TYPE_2D,
@@ -1483,7 +1433,7 @@ int create_image(Application *app, u32 width, u32 height, VkFormat format,
       find_memory_type(app, memory_requirements.memoryTypeBits, properties);
   if (memory_type_index < 0) {
     fprintf(stderr, "Unable to find adequate memory type index.\n");
-    return -1;
+    return false;
   }
   VkMemoryAllocateInfo alloc_info = {.sType =
                                          VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -1492,10 +1442,10 @@ int create_image(Application *app, u32 width, u32 height, VkFormat format,
   VKTRY(vkAllocateMemory(app->device, &alloc_info, NULL, memory),
         "Vulkan error: failed to allocate memory for image texture");
   vkBindImageMemory(app->device, *image, *memory, 0);
-  return 0;
+  return true;
 }
-int copy_buffer_to_image(VkCommandBuffer cmd, u32 w, u32 h, VkBuffer buffer,
-                         VkImage image) {
+bool copy_buffer_to_image(VkCommandBuffer cmd, u32 w, u32 h, VkBuffer buffer,
+                          VkImage image) {
 
   VkBufferImageCopy copy_region = {
       .bufferOffset = 0,
@@ -1511,10 +1461,10 @@ int copy_buffer_to_image(VkCommandBuffer cmd, u32 w, u32 h, VkBuffer buffer,
   vkCmdCopyBufferToImage(cmd, buffer, image,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
-  return 0;
+  return true;
 }
 
-i32 vk_begin_rendering(Application *app,
+i32 rd_begin_rendering(Application *app,
                        VkCommandBuffer *current_command_buffer) {
   // await for previous frame to be drawn
   VKTRY(vkWaitForFences(app->device, 1, &app->draw_fences[app->frame_index],
@@ -1586,8 +1536,8 @@ i32 vk_begin_rendering(Application *app,
   return (i32)image_index;
 }
 
-int vk_end_rendering(Application *app, VkCommandBuffer *current_command_buffer,
-                     u32 image_index) {
+bool rd_end_rendering(Application *app, VkCommandBuffer *current_command_buffer,
+                      u32 image_index) {
   vkCmdEndRendering(*current_command_buffer);
 
   transition_image_layout(
@@ -1627,5 +1577,5 @@ int vk_end_rendering(Application *app, VkCommandBuffer *current_command_buffer,
 
   app->frame_index = (app->frame_index + 1) % app->inflight_count;
 
-  return 0;
+  return true;
 }

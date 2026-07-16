@@ -11,17 +11,18 @@ typedef struct UniformBufferObject {
   Mat4 proj;
 } UniformBufferObject;
 
-static int vk_init(Application *app);
-static void vk_cleanup(Application *app);
-static int vk_resize(Application *app);
-int vk_create_pipeline(Application *app);
-int vk_create_descriptor_set(Application *app);
-int vk_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height);
+static bool rd_create_instance(Application *app);
+static bool rd_init(Application *app);
+static void rd_cleanup(Application *app);
+static bool rd_resize(Application *app);
+bool rd_create_pipeline(Application *app);
+bool rd_create_descriptor_set(Application *app);
+bool rd_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height);
 
-int swapchain_init(Arena *arena, Application *app);
-int swapchain_cleanup(Application *app);
-int depth_buffer_init(Application *app);
-int depth_buffer_cleanup(Application *app);
+bool swapchain_init(Arena *arena, Application *app);
+bool swapchain_cleanup(Application *app);
+bool depth_buffer_init(Application *app);
+bool depth_buffer_cleanup(Application *app);
 
 bool has_extension(u32 actual_count, VkExtensionProperties *actual_props,
                    const char *const expected);
@@ -29,22 +30,23 @@ bool get_extensions(Arena *arena, u32 *extension_count,
                     const char ***extension_names);
 bool get_layers(Arena *arena, u32 *layer_count, const char ***layer_properties);
 
-int create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
+bool create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
                   VkMemoryPropertyFlags properties, VkSharingMode sharing_mode,
                   uint32_t queueFamilyIndexCount,
                   const uint32_t *pQueueFamilyIndices, VkBuffer *buffer,
                   VkDeviceMemory *memory);
-int upload_device_local_array(Application *app, void *array, VkDeviceSize buffer_size,
-                 VkBufferUsageFlags additional_usage, VkBuffer *buffer,
-                 VkDeviceMemory *memory);
+bool upload_device_local_array(Application *app, void *array,
+                              VkDeviceSize buffer_size,
+                              VkBufferUsageFlags additional_usage,
+                              VkBuffer *buffer, VkDeviceMemory *memory);
 
-int create_image(Application *app, u32 width, u32 height, VkFormat format,
+bool create_image(Application *app, u32 width, u32 height, VkFormat format,
                  VkMemoryPropertyFlags properties, VkImageTiling tiling,
                  VkImageUsageFlags usage, VkSharingMode sharing_mode,
                  u32 queue_family_index_count,
                  const u32 *p_queue_family_indices, VkImage *image,
                  VkDeviceMemory *memory);
-int copy_buffer_to_image(VkCommandBuffer cmd, u32 w, u32 h, VkBuffer buffer,
+bool copy_buffer_to_image(VkCommandBuffer cmd, u32 w, u32 h, VkBuffer buffer,
                          VkImage image);
 void transition_image_layout(
     VkCommandBuffer command_buffer, VkImage image, VkImageLayout old_layout,
