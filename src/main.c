@@ -1,9 +1,6 @@
 #include "main.h"
 #include <stdio.h>
 
-static u32 vc = 0;
-static u32 ic = 0;
-
 #include "vulkan.c"
 
 #define TV(x, y, r, g, b, u, v)                                                \
@@ -33,7 +30,6 @@ static int glfw_init(Application *app) {
   }
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
   app->window = glfwCreateWindow(1000, 1000, "Vulkan", NULL, NULL);
 
@@ -60,7 +56,72 @@ static int glfw_init(Application *app) {
 
 int init_atlas(Arena *arena, Str font_path, Atlas *a);
 
-// @init
+int compute_frame(Application *app, Atlas *atlas) {
+  // text
+  u32 vc = 0;
+  u32 ic = 0;
+
+  f32 start_x =
+      (f32)app->editor_viewport.x + (f32)app->editor_viewport.padding_h;
+  f32 start_y =
+      (f32)app->editor_viewport.y + (f32)app->editor_viewport.padding_v;
+  f32 end_x = (f32)app->editor_viewport.x + (f32)app->editor_viewport.w -
+              (f32)app->editor_viewport.padding_h;
+  f32 end_y = (f32)app->editor_viewport.y + (f32)app->editor_viewport.h -
+              (f32)app->editor_viewport.padding_v;
+
+  printf("%f, %f, %f, %f\n", start_x, start_y, end_x, end_y);
+  f32 px = start_x;
+  f32 py = start_y;
+  for (u32 i = 0; i < app->editor_text.length; i++) {
+    u8 c = app->editor_text.data[i];
+
+    if (c == '\n') {
+      px = start_x;
+      py += atlas->line_height;
+      continue;
+    }
+
+    if (c < FIRST_CHAR || c >= FIRST_CHAR + CHAR_COUNT)
+      continue;
+
+    u16 base = (u16)vc;
+    stbtt_bakedchar *g = &atlas->glyphs[c - FIRST_CHAR];
+
+    if (px < start_x || px > end_x || py < start_y || py > end_y) {
+      // printf("%c -- out of bound\n", c);
+      px += g->xadvance;
+      continue;
+    }
+    f32 x0 = px + g->xoff;
+    f32 y0 = py + g->yoff;
+    f32 x1 = x0 + (g->x1 - g->x0);
+    f32 y1 = y0 + (g->y1 - g->y0);
+
+    f32 u0 = g->x0 / (float)atlas->w;
+    f32 v0 = g->y0 / (float)atlas->h;
+    f32 u1 = g->x1 / (float)atlas->w;
+    f32 v1 = g->y1 / (float)atlas->h;
+
+    vertices[vc++] = BTV(x0, y0, u0, v0);
+    vertices[vc++] = BTV(x1, y0, u1, v0);
+    vertices[vc++] = BTV(x1, y1, u1, v1);
+    vertices[vc++] = BTV(x0, y1, u0, v1);
+
+    indices[ic++] = base + 0;
+    indices[ic++] = base + 1;
+    indices[ic++] = base + 2;
+    indices[ic++] = base + 0;
+    indices[ic++] = base + 2;
+    indices[ic++] = base + 3;
+
+    app->editor_glyph_count = vc;
+
+    px += g->xadvance;
+  }
+
+  return 0;
+}
 
 int draw_frame(Application *app) {
   VkCommandBuffer current_command_buffer = NULL;
@@ -68,36 +129,38 @@ int draw_frame(Application *app) {
   if (image_index < 0)
     perror("failed to begin rendering");
 
-  vkCmdBindPipeline(current_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    app->pipeline);
-  VkBuffer vertex_buffers[] = {app->geometry_buffer};
-  VkDeviceSize offsets[] = {app->vertex_offset};
-  vkCmdBindVertexBuffers(current_command_buffer, 0, 1, vertex_buffers, offsets);
-  vkCmdBindIndexBuffer(current_command_buffer, app->geometry_buffer,
-                       app->index_offset, VK_INDEX_TYPE_UINT16);
-
-  // uniform
+  // text
   {
+    vkCmdBindPipeline(current_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      app->pipeline);
+    VkBuffer vertex_buffers[] = {app->geometry_buffer};
+    VkDeviceSize offsets[] = {app->vertex_offset};
+    vkCmdBindVertexBuffers(current_command_buffer, 0, 1, vertex_buffers,
+                           offsets);
+    vkCmdBindIndexBuffer(current_command_buffer, app->geometry_buffer,
+                         app->index_offset, VK_INDEX_TYPE_UINT16);
+
+    // uniform
     UniformBufferObject ubo = {};
     ubo.proj = Orthographic_RH_ZO(0.f, (f32)app->swap_extent.width, 0.f,
                                   (f32)app->swap_extent.height, -1.f, 1.f);
 
     memcpy(app->uniform_buffers_mapped[app->frame_index], &ubo, sizeof(ubo));
-
     vkCmdBindDescriptorSets(current_command_buffer,
                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                             app->pipeline_layout, 0, 1,
                             &app->descriptor_sets[app->frame_index], 0, NULL);
+
+    // dynamic
+    vkCmdSetViewport(current_command_buffer, 0., 1.,
+                     &(VkViewport){0., 0., (f32)app->swap_extent.width,
+                                   (f32)app->swap_extent.height, 0., 1.});
+    vkCmdSetScissor(current_command_buffer, 0., 1.,
+                    &(VkRect2D){{0, 0}, app->swap_extent});
+
+    vkCmdDrawIndexed(current_command_buffer, app->editor_glyph_count, 1, 0, 0,
+                     0);
   }
-
-  // dynamic
-  vkCmdSetViewport(current_command_buffer, 0., 1.,
-                   &(VkViewport){0., 0., (f32)app->swap_extent.width,
-                                 (f32)app->swap_extent.height, 0., 1.});
-  vkCmdSetScissor(current_command_buffer, 0., 1.,
-                  &(VkRect2D){{0, 0}, app->swap_extent});
-
-  vkCmdDrawIndexed(current_command_buffer, ic, 1, 0, 0, 0);
 
   vk_end_rendering(app, &current_command_buffer, (u32)image_index);
 
@@ -105,7 +168,8 @@ int draw_frame(Application *app) {
 }
 
 // @main loop
-static void main_loop(Application *app) {
+static void main_loop(Application *app, Atlas *atlas) {
+  (void)atlas;
   char title[64];
   f64 last_time = now_seconds();
   uint32_t frame_count = 0;
@@ -148,13 +212,18 @@ int main(void) {
     return EXIT_FAILURE;
   };
 
-  // stbi_write_png("font_atlas.png", (int)atlas.w, (int)atlas.h,
-  //                1, // 1 canal: R8 / alpha
-  //                atlas.data,
-  //                (int)atlas.w // stride
-  // );
+  int w, h;
+  glfwGetFramebufferSize(app.window, &w, &h);
+  app.editor_viewport = (Viewport){.x = 64,
+                                   .y = 64,
+                                   .w = (u32)w - 64 * 2,
+                                   .h = (u32)h - 64 * 2,
+                                   .padding_h = 32,
+                                   .padding_v = 32};
 
-  Str text = S(
+  app.editor_cursor = (Cursor){.col = 0, .row = 0};
+
+  app.editor_text = S(
       "The quick brown fox jumps over the lazy dog\n"
       "?[{()}]!$<-/#%\\_>`~&:'@^\";|*\n"
       "Porro omnis perspiciatis qui perspiciatis repudiandae. Temporibus iusto "
@@ -174,50 +243,8 @@ int main(void) {
       "harum dolores non suscipit et aut. Fuga facere et quo. Error fuga quo "
       "nostrum.");
 
-  f32 start_x = 20;
-  f32 start_y = 256;
-  f32 px = start_x;
-  f32 py = start_y;
-  for (u32 i = 0; i < text.length; i++) {
-    u8 c = text.data[i];
-
-    if (c == '\n') {
-      printf("car\n");
-      py += atlas.line_height;
-      px = start_x;
-      continue;
-    }
-
-    if (c < FIRST_CHAR || c >= FIRST_CHAR + CHAR_COUNT)
-      continue;
-
-    u16 base = (u16)vc;
-    stbtt_bakedchar *g = &atlas.glyphs[c - FIRST_CHAR];
-
-    f32 x0 = px + g->xoff;
-    f32 y0 = py + g->yoff;
-    f32 x1 = x0 + (g->x1 - g->x0);
-    f32 y1 = y0 + (g->y1 - g->y0);
-
-    f32 u0 = g->x0 / (float)atlas.w;
-    f32 v0 = g->y0 / (float)atlas.h;
-    f32 u1 = g->x1 / (float)atlas.w;
-    f32 v1 = g->y1 / (float)atlas.h;
-
-    vertices[vc++] = BTV(x0, y0, u0, v0);
-    vertices[vc++] = BTV(x1, y0, u1, v0);
-    vertices[vc++] = BTV(x1, y1, u1, v1);
-    vertices[vc++] = BTV(x0, y1, u0, v1);
-
-    indices[ic++] = base + 0;
-    indices[ic++] = base + 1;
-    indices[ic++] = base + 2;
-    indices[ic++] = base + 0;
-    indices[ic++] = base + 2;
-    indices[ic++] = base + 3;
-
-    px += g->xadvance;
-  }
+  // move in loop, update dirty host visible buffer
+  compute_frame(&app, &atlas);
 
   if (vk_init(&app) != 0) {
     vk_cleanup(&app);
@@ -229,7 +256,7 @@ int main(void) {
   vk_create_pipeline(&app);
   vk_create_descriptor_set(&app);
 
-  main_loop(&app);
+  main_loop(&app, &atlas);
   vk_cleanup(&app);
 
   return EXIT_SUCCESS;

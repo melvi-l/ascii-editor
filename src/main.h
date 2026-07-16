@@ -35,7 +35,23 @@
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
+typedef struct Viewport {
+  i32 x, y;
+  u32 w, h;
+  u32 padding_h, padding_v;
+} Viewport;
+typedef struct Cursor {
+  u32 col;
+  u32 row;
+} Cursor;
+
 typedef struct Application {
+  Str editor_text;
+  u32 editor_glyph_count;
+  Viewport editor_viewport;
+  Cursor editor_cursor;
+
+  // plat
   GLFWwindow *window;
 
   Arena *vulkan_arena;

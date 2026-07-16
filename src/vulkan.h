@@ -34,7 +34,7 @@ int create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
                   uint32_t queueFamilyIndexCount,
                   const uint32_t *pQueueFamilyIndices, VkBuffer *buffer,
                   VkDeviceMemory *memory);
-int upload_array(Application *app, void *array, VkDeviceSize buffer_size,
+int upload_device_local_array(Application *app, void *array, VkDeviceSize buffer_size,
                  VkBufferUsageFlags additional_usage, VkBuffer *buffer,
                  VkDeviceMemory *memory);
 

@@ -358,10 +358,11 @@ static int vk_init(Application *app) {
     memcpy(geometry_array + app->vertex_offset, vertices, vertex_size);
     memcpy(geometry_array + app->index_offset, indices, index_size);
 
-    if (upload_array(app, geometry_array, geometry_size,
-                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                     &app->geometry_buffer, &app->geometry_memory) != 0) {
+    if (upload_device_local_array(app, geometry_array, geometry_size,
+                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                  &app->geometry_buffer,
+                                  &app->geometry_memory) != 0) {
       return -1;
     }
   }
@@ -1402,9 +1403,10 @@ int copy_buffer(VkQueue queue, VkCommandBuffer cmd, VkBuffer *src,
   VKTRY(vkQueueWaitIdle(queue), "Vulkan error: Failed to wait transfer queue");
   return 0;
 }
-int upload_array(Application *app, void *array, VkDeviceSize buffer_size,
-                 VkBufferUsageFlags additional_usage, VkBuffer *buffer,
-                 VkDeviceMemory *memory) {
+int upload_device_local_array(Application *app, void *array,
+                              VkDeviceSize buffer_size,
+                              VkBufferUsageFlags additional_usage,
+                              VkBuffer *buffer, VkDeviceMemory *memory) {
   VkBuffer staging_buffer = VK_NULL_HANDLE;
   VkDeviceMemory staging_memory = VK_NULL_HANDLE;
   if (create_buffer(app, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
