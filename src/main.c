@@ -3,17 +3,13 @@
 #include "plat.c"
 #include "rd.c"
 
-#define TV(x, y, r, g, b, u, v)                                                \
-  ((TextVertex){.position = {.X = x, .Y = y},                                  \
-                .color = {.R = r, .G = g, .B = b},                             \
-                .uv = {.U = u, .V = v}})
-
-#define BTV(x, y, u, v) TV(x, y, 1, 1, 1, u, v)
-
 int init_atlas(Arena *arena, Str font_path, Atlas *a);
 
 int compute_frame(Application *app) {
   Atlas *atlas = &app->atlas;
+
+  printf("window: %u x %u, framebuffer: %u x %u\n", app->w, app->h,
+         app->swap_extent.width, app->swap_extent.height);
   app->editor_viewport = (Viewport){.x = 64,
                                     .y = 64,
                                     .w = app->w - 64 * 2,
@@ -57,17 +53,22 @@ int compute_frame(Application *app) {
       continue;
     }
 
-    instances[ic++] = (GlyphInstance){.x = px + g->xoff,
-                                      .y = py + g->yoff,
-                                      .w = g->x1 - g->x0,
-                                      .h = g->y1 - g->y0,
-                                      .u_min_x = g->x0 / (float)atlas->w,
-                                      .u_min_y = g->y0 / (float)atlas->h,
-                                      .u_max_x = g->x1 / (float)atlas->w,
-                                      .u_max_y = g->y1 / (float)atlas->h,
-                                      .r = 1.,
-                                      .g = 1.,
-                                      .b = 1.};
+    f32 glyph_x = roundf(px + g->xoff);
+    f32 glyph_y = roundf(py + g->yoff);
+
+    instances[ic++] = (GlyphInstance){
+        .x = glyph_x,
+        .y = glyph_y,
+        .w = (f32)(g->x1 - g->x0),
+        .h = (f32)(g->y1 - g->y0),
+        .u_min_x = (f32)g->x0 / (f32)atlas->w,
+        .u_min_y = (f32)g->y0 / (f32)atlas->h,
+        .u_max_x = (f32)g->x1 / (f32)atlas->w,
+        .u_max_y = (f32)g->y1 / (f32)atlas->h,
+        .r = 1.0f,
+        .g = 1.0f,
+        .b = 1.0f,
+    };
 
     px += g->xadvance;
   }
@@ -102,8 +103,8 @@ int draw_frame(Application *app) {
 
     // uniform
     UniformBufferObject ubo = {};
-    ubo.proj = Orthographic_RH_ZO(0.f, (f32)app->swap_extent.width, 0.f,
-                                  (f32)app->swap_extent.height, -1.f, 1.f);
+    ubo.proj =
+        Orthographic_RH_ZO(0.f, (f32)app->w, 0.f, (f32)app->h, -1.f, 1.f);
 
     memcpy(app->uniform_mapped_arrays[app->frame_index], &ubo, sizeof(ubo));
     vkCmdBindDescriptorSets(current_command_buffer,
@@ -113,8 +114,7 @@ int draw_frame(Application *app) {
 
     // dynamic
     vkCmdSetViewport(current_command_buffer, 0., 1.,
-                     &(VkViewport){0., 0., (f32)app->swap_extent.width,
-                                   (f32)app->swap_extent.height, 0., 1.});
+                     &(VkViewport){0., 0., (f32)app->w, (f32)app->h, 0., 1.});
     vkCmdSetScissor(current_command_buffer, 0., 1.,
                     &(VkRect2D){{0, 0}, app->swap_extent});
 
@@ -170,7 +170,7 @@ int main(void) {
   }
 
   if (init_atlas(app.vulkan_arena,
-                 S("/usr/share/fonts/TTF/CaskaydiaMonoNerdFont-Regular.ttf"),
+                 S("/usr/share/fonts/TTF/RobotoMono-Regular.ttf"),
                  &app.atlas) != 0) {
     return EXIT_FAILURE;
   };
@@ -182,14 +182,18 @@ int main(void) {
   app.editor_text =
       S("The quick brown fox jumps over the lazy dog\n"
         "?[{()}]!$<-/#%\\_>`~&:'@^\";|*\n"
+        "123456789\n"
+        "123456789\n"
         "Porro omnis perspiciatis qui perspiciatis repudiandae. Temporibus "
         "iusto "
         "doloribus distinctio. Fuga sint odio nobis culpa aliquam. Non aut aut "
         "illum.\n"
+        "123456789\n"
         "Alias occaecati velit aliquid corrupti. Omnis provident sunt "
         "laudantium "
         "impedit. Quia dicta illum et.\n"
         "Fuga ullam laudantium consequatur tenetur molestiae. Enim omnis "
+        "123456789\n"
         "debitis "
         "facere veniam nobis magni. Quo et totam magnam. Tenetur aut ipsum "
         "praesentium. Placeat est omnis laborum vero ducimus et repellendus "
@@ -238,7 +242,7 @@ cleanup:
 
 // @font-atlas
 int init_atlas(Arena *arena, Str font_path, Atlas *a) {
-  *a = (Atlas){.w = 512, .h = 512, .font_size = 18};
+  *a = (Atlas){.w = 512, .h = 512, .font_size = 28};
   a->data = ARENA_PUSH_ARRAY(arena, a->w * a->h, u8);
 
   Str ttf_file;
@@ -268,7 +272,3 @@ int init_atlas(Arena *arena, Str font_path, Atlas *a) {
 
   return 0;
 }
-
-// int upload_atlas() {}
-//
-// int cleanup_atlas() {}
