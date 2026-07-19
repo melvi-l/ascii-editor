@@ -5,9 +5,21 @@ ConstantBuffer<UniformBuffer> ubo;
 Sampler2D atlas_sampler;
 
 struct VIn {
-    float2 position;
-    float3 color;
+    [[vk::location(0)]]
+    float2 vPosition;
+    [[vk::location(1)]]
     float2 uv;
+    
+    [[vk::location(2)]]
+    float2 iPosition;
+    [[vk::location(3)]]
+    float2 size;
+    [[vk::location(4)]]
+    float2 uvMin;
+    [[vk::location(5)]]
+    float2 uvMax;
+    [[vk::location(6)]]
+    float3 color;
 }
 
 struct VOut {
@@ -19,9 +31,10 @@ struct VOut {
 [shader("vertex")]
 VOut vertMain(VIn input) {
     VOut output;
-    output.position = mul(ubo.projection, float4(input.position, 0., 1.));
+    float2 position = input.iPosition + input.vPosition * input.size;
+    output.position = mul(ubo.projection, float4(position, 0., 1.));
     output.color = input.color;
-    output.uv = input.uv;
+    output.uv = lerp(input.uvMin, input.uvMax, input.uv);
     return output;
 }
 

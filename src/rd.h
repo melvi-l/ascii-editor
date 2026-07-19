@@ -2,11 +2,16 @@
 
 #include <vulkan/vulkan_core.h>
 
-typedef struct TextVertex {
-  Vec2 position;
-  Vec3 color;
-  Vec2 uv;
-} TextVertex;
+typedef struct Vertex {
+  f32 x, y;
+  f32 u, v;
+} Vertex;
+typedef struct GlyphInstance {
+  f32 x, y, w, h;
+  f32 u_min_x, u_min_y;
+  f32 u_max_x, u_max_y;
+  f32 r, g, b;
+} GlyphInstance;
 typedef struct UniformBufferObject {
   Mat4 proj;
 } UniformBufferObject;
@@ -30,24 +35,24 @@ bool get_extensions(Arena *arena, u32 *extension_count,
                     const char ***extension_names);
 bool get_layers(Arena *arena, u32 *layer_count, const char ***layer_properties);
 
-bool create_buffer(Application *app, VkDeviceSize size, VkBufferUsageFlags usage,
-                  VkMemoryPropertyFlags properties, VkSharingMode sharing_mode,
-                  uint32_t queueFamilyIndexCount,
-                  const uint32_t *pQueueFamilyIndices, VkBuffer *buffer,
-                  VkDeviceMemory *memory);
+bool create_buffer(Application *app, VkDeviceSize size,
+                   VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                   VkSharingMode sharing_mode, uint32_t queueFamilyIndexCount,
+                   const uint32_t *pQueueFamilyIndices, VkBuffer *buffer,
+                   VkDeviceMemory *memory);
 bool upload_device_local_array(Application *app, void *array,
-                              VkDeviceSize buffer_size,
-                              VkBufferUsageFlags additional_usage,
-                              VkBuffer *buffer, VkDeviceMemory *memory);
+                               VkDeviceSize buffer_size,
+                               VkBufferUsageFlags additional_usage,
+                               VkBuffer *buffer, VkDeviceMemory *memory);
 
 bool create_image(Application *app, u32 width, u32 height, VkFormat format,
-                 VkMemoryPropertyFlags properties, VkImageTiling tiling,
-                 VkImageUsageFlags usage, VkSharingMode sharing_mode,
-                 u32 queue_family_index_count,
-                 const u32 *p_queue_family_indices, VkImage *image,
-                 VkDeviceMemory *memory);
+                  VkMemoryPropertyFlags properties, VkImageTiling tiling,
+                  VkImageUsageFlags usage, VkSharingMode sharing_mode,
+                  u32 queue_family_index_count,
+                  const u32 *p_queue_family_indices, VkImage *image,
+                  VkDeviceMemory *memory);
 bool copy_buffer_to_image(VkCommandBuffer cmd, u32 w, u32 h, VkBuffer buffer,
-                         VkImage image);
+                          VkImage image);
 void transition_image_layout(
     VkCommandBuffer command_buffer, VkImage image, VkImageLayout old_layout,
     VkImageLayout new_layout, VkAccessFlags2 src_access_mask,

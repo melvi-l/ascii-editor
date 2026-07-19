@@ -44,15 +44,28 @@ typedef struct Cursor {
   u32 row;
 } Cursor;
 
+typedef struct Atlas {
+  // stbtt_fontinfo font;
+  u8 *data;
+  u32 w, h;
+
+  stbtt_bakedchar glyphs[96]; // ASCII 32..126 is 95 glyphs
+
+  f32 font_size, line_height;
+  f32 ascent, descent;
+} Atlas;
+
 typedef struct Application {
   Str editor_text;
   u32 editor_glyph_count;
+  bool editor_glyph_is_dirty;
   Viewport editor_viewport;
   Cursor editor_cursor;
 
   u32 w, h;
 
   Platform plat;
+  Atlas atlas;
 
   Arena *vulkan_arena;
   Arena *scratch_arena;
@@ -94,9 +107,13 @@ typedef struct Application {
   VkDeviceSize vertex_offset;
   VkDeviceSize index_offset;
 
+  VkBuffer instance_buffer;
+  VkDeviceMemory instance_memory;
+  void *instance_mapped_array;
+
   VkBuffer *uniform_buffers;
   VkDeviceMemory *uniform_memories;
-  void **uniform_buffers_mapped;
+  void **uniform_mapped_arrays;
 
   u32 graphic_queue_index;
   VkQueue graphic_queue;
@@ -112,17 +129,6 @@ typedef struct Application {
   VkSemaphore *render_finish_semas;
   VkFence *draw_fences;
 } Application;
-
-typedef struct {
-  // stbtt_fontinfo font;
-  u8 *data;
-  u32 w, h;
-
-  stbtt_bakedchar glyphs[96]; // ASCII 32..126 is 95 glyphs
-
-  f32 font_size, line_height;
-  f32 ascent, descent;
-} Atlas;
 
 #define FIRST_CHAR 32
 #define CHAR_COUNT 96

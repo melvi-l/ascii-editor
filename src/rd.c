@@ -1,12 +1,19 @@
 #include "rd.h"
+#include "base.h"
 #include "main.h"
 #include <vulkan/vulkan_core.h>
 
-#define MAX_GLYPH (1 << 14)
-#define max_vertices_count (MAX_GLYPH * 4)
-#define max_indices_count (MAX_GLYPH * 6)
-static TextVertex vertices[max_vertices_count];
-static u16 indices[max_indices_count];
+#define vertices_count 4
+static Vertex vertices[vertices_count] = {
+    {0, 0, 0, 0},
+    {0, 1, 0, 1},
+    {1, 0, 1, 0},
+    {1, 1, 1, 1},
+};
+#define indices_count 6
+static u16 indices[indices_count] = {0, 2, 1, 1, 2, 3};
+#define max_glyph_count (1 << 14)
+static GlyphInstance instances[max_glyph_count];
 
 #ifdef VK_ENABLE_VALIDATION
 static const bool is_validation_enabled = 1;
@@ -257,8 +264,6 @@ static bool rd_init(Application *app) {
   depth_buffer_init(app);
 
   // @render pipeline
-  {
-  }
 
   // @command pool & buffer
   {
@@ -300,13 +305,12 @@ static bool rd_init(Application *app) {
           "Vulkan error: Failed to allocate transfer command buffer");
   }
 
-  // image before
-
-  // @buffer (vertex & index)
+  // @buffer (vertex & index & instance)
   {
+    // device local
     ArenaTemp temp = arena_temp_begin(app->scratch_arena);
-    VkDeviceSize vertex_size = sizeof(vertices[0]) * max_vertices_count;
-    VkDeviceSize index_size = sizeof(indices[0]) * max_indices_count;
+    VkDeviceSize vertex_size = sizeof(vertices[0]) * vertices_count;
+    VkDeviceSize index_size = sizeof(indices[0]) * indices_count;
     VkDeviceSize geometry_size = vertex_size + index_size;
 
     app->vertex_offset = 0;
@@ -323,6 +327,26 @@ static bool rd_init(Application *app) {
                                    &app->geometry_memory)) {
       return false;
     }
+
+    // host visible + keep map memory
+    VkDeviceSize instance_size = sizeof(instances[0]) * max_glyph_count;
+
+    app->instance_mapped_array =
+        ARENA_PUSH_ARRAY(app->vulkan_arena, instance_size, u8);
+
+    if (!create_buffer(app, instance_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                       VK_SHARING_MODE_EXCLUSIVE, 0, 0, &app->instance_buffer,
+                       &app->instance_memory)) {
+      return false;
+    }
+
+    // TODO(melvil): maybe create a x2 buffer to swap without race condition
+    VKTRY(vkMapMemory(app->device, app->instance_memory, 0, instance_size, 0,
+                      &app->instance_mapped_array),
+          "Vulkan error: Failed to map memory for vertex buffer");
+    arena_temp_end(temp);
   }
 
   // Descriptor
@@ -335,7 +359,7 @@ static bool rd_init(Application *app) {
         ARENA_PUSH_ARRAY(app->vulkan_arena, app->inflight_count, VkBuffer);
     app->uniform_memories = ARENA_PUSH_ARRAY(
         app->vulkan_arena, app->inflight_count, VkDeviceMemory);
-    app->uniform_buffers_mapped =
+    app->uniform_mapped_arrays =
         ARENA_PUSH_ARRAY(app->vulkan_arena, app->inflight_count, void *);
 
     for (u32 i = 0; i < app->inflight_count; i++) {
@@ -345,7 +369,7 @@ static bool rd_init(Application *app) {
                     VK_SHARING_MODE_EXCLUSIVE, 0, NULL,
                     &app->uniform_buffers[i], &app->uniform_memories[i]);
       VKTRY(vkMapMemory(app->device, app->uniform_memories[i], 0, uniform_size,
-                        0, &app->uniform_buffers_mapped[i]),
+                        0, &app->uniform_mapped_arrays[i]),
             "Vulkan error: Failed to map memory for uniform buffer");
     }
   }
@@ -616,6 +640,13 @@ static void rd_cleanup(Application *app) {
   if (app->geometry_memory != VK_NULL_HANDLE)
     vkFreeMemory(app->device, app->geometry_memory, NULL);
 
+  if (app->instance_mapped_array != VK_NULL_HANDLE)
+    vkUnmapMemory(app->device, app->instance_mapped_array);
+  if (app->instance_buffer != VK_NULL_HANDLE)
+    vkDestroyBuffer(app->device, app->instance_buffer, NULL);
+  if (app->instance_memory != VK_NULL_HANDLE)
+    vkFreeMemory(app->device, app->instance_memory, NULL);
+
   if (app->texture_image != VK_NULL_HANDLE)
     vkDestroyImage(app->device, app->texture_image, NULL);
   if (app->texture_memory != VK_NULL_HANDLE)
@@ -625,10 +656,12 @@ static void rd_cleanup(Application *app) {
   if (app->texture_sampler != VK_NULL_HANDLE)
     vkDestroySampler(app->device, app->texture_sampler, NULL);
 
+  if (app->uniform_mapped_arrays != NULL)
+    for (u32 i = 0; i < app->inflight_count; i++)
+      vkUnmapMemory(app->device, app->uniform_mapped_arrays[i]);
   if (app->uniform_buffers != NULL)
     for (u32 i = 0; i < app->inflight_count; i++)
       vkDestroyBuffer(app->device, app->uniform_buffers[i], NULL);
-
   if (app->uniform_memories != VK_NULL_HANDLE)
     for (u32 i = 0; i < app->inflight_count; i++)
       vkFreeMemory(app->device, app->uniform_memories[i], NULL);
@@ -757,28 +790,47 @@ bool rd_create_pipeline(Application *app) {
       .dynamicStateCount = 2,
       .pDynamicStates = dynamic_states};
 
-  VkVertexInputBindingDescription binding = (VkVertexInputBindingDescription){
-      .binding = 0,
-      .stride = sizeof(TextVertex),
-      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
-  VkVertexInputAttributeDescription attributes[3] = {
+  VkVertexInputBindingDescription bindings[2] = {
+      {.binding = 0,
+       .stride = sizeof(Vertex),
+       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX},
+      {.binding = 1,
+       .stride = sizeof(GlyphInstance),
+       .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE}};
+  VkVertexInputAttributeDescription attributes[7] = {
       {.location = 0,
        .binding = 0,
        .format = VK_FORMAT_R32G32_SFLOAT,
-       .offset = offsetof(TextVertex, position)},
+       .offset = offsetof(Vertex, x)},
       {.location = 1,
        .binding = 0,
-       .format = VK_FORMAT_R32G32B32_SFLOAT,
-       .offset = offsetof(TextVertex, color)},
-      {.location = 2,
-       .binding = 0,
        .format = VK_FORMAT_R32G32_SFLOAT,
-       .offset = offsetof(TextVertex, uv)}};
+       .offset = offsetof(Vertex, u)},
+      {.location = 2,
+       .binding = 1,
+       .format = VK_FORMAT_R32G32_SFLOAT,
+       .offset = offsetof(GlyphInstance, x)},
+      {.location = 3,
+       .binding = 1,
+       .format = VK_FORMAT_R32G32_SFLOAT,
+       .offset = offsetof(GlyphInstance, w)},
+      {.location = 4,
+       .binding = 1,
+       .format = VK_FORMAT_R32G32_SFLOAT,
+       .offset = offsetof(GlyphInstance, u_min_x)},
+      {.location = 5,
+       .binding = 1,
+       .format = VK_FORMAT_R32G32_SFLOAT,
+       .offset = offsetof(GlyphInstance, u_max_x)},
+      {.location = 6,
+       .binding = 1,
+       .format = VK_FORMAT_R32G32B32_SFLOAT,
+       .offset = offsetof(GlyphInstance, r)}};
   VkPipelineVertexInputStateCreateInfo vertex_input_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .vertexBindingDescriptionCount = 1,
-      .pVertexBindingDescriptions = &binding,
-      .vertexAttributeDescriptionCount = 3,
+      .vertexBindingDescriptionCount = 2,
+      .pVertexBindingDescriptions = bindings,
+      .vertexAttributeDescriptionCount = 7,
       .pVertexAttributeDescriptions = attributes,
   };
   VkPipelineInputAssemblyStateCreateInfo input_assembly_info = {

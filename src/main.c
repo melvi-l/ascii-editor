@@ -12,9 +12,15 @@
 
 int init_atlas(Arena *arena, Str font_path, Atlas *a);
 
-int compute_frame(Application *app, Atlas *atlas) {
+int compute_frame(Application *app) {
+  Atlas *atlas = &app->atlas;
+  app->editor_viewport = (Viewport){.x = 64,
+                                    .y = 64,
+                                    .w = app->w - 64 * 2,
+                                    .h = app->h - 64 * 2,
+                                    .padding_h = 32,
+                                    .padding_v = 32};
   // text
-  u32 vc = 0;
   u32 ic = 0;
 
   f32 start_x =
@@ -26,7 +32,7 @@ int compute_frame(Application *app, Atlas *atlas) {
   f32 end_y = (f32)app->editor_viewport.y + (f32)app->editor_viewport.h -
               (f32)app->editor_viewport.padding_v;
 
-  printf("%f, %f, %f, %f\n", start_x, start_y, end_x, end_y);
+  printf("Compute frame with %f, %f, %f, %f\n", start_x, start_y, end_x, end_y);
   f32 px = start_x;
   f32 py = start_y;
   for (u32 i = 0; i < app->editor_text.length; i++) {
@@ -41,40 +47,32 @@ int compute_frame(Application *app, Atlas *atlas) {
     if (c < FIRST_CHAR || c >= FIRST_CHAR + CHAR_COUNT)
       continue;
 
-    u16 base = (u16)vc;
     stbtt_bakedchar *g = &atlas->glyphs[c - FIRST_CHAR];
 
     if (px < start_x || px > end_x || py < start_y || py > end_y) {
       // printf("%c -- out of bound\n", c);
-      px += g->xadvance;
+      // px += g->xadvance;
+      px = start_x;
+      py += atlas->line_height;
       continue;
     }
-    f32 x0 = px + g->xoff;
-    f32 y0 = py + g->yoff;
-    f32 x1 = x0 + (g->x1 - g->x0);
-    f32 y1 = y0 + (g->y1 - g->y0);
 
-    f32 u0 = g->x0 / (float)atlas->w;
-    f32 v0 = g->y0 / (float)atlas->h;
-    f32 u1 = g->x1 / (float)atlas->w;
-    f32 v1 = g->y1 / (float)atlas->h;
-
-    vertices[vc++] = BTV(x0, y0, u0, v0);
-    vertices[vc++] = BTV(x1, y0, u1, v0);
-    vertices[vc++] = BTV(x1, y1, u1, v1);
-    vertices[vc++] = BTV(x0, y1, u0, v1);
-
-    indices[ic++] = base + 0;
-    indices[ic++] = base + 1;
-    indices[ic++] = base + 2;
-    indices[ic++] = base + 0;
-    indices[ic++] = base + 2;
-    indices[ic++] = base + 3;
-
-    app->editor_glyph_count = vc;
+    instances[ic++] = (GlyphInstance){.x = px + g->xoff,
+                                      .y = py + g->yoff,
+                                      .w = g->x1 - g->x0,
+                                      .h = g->y1 - g->y0,
+                                      .u_min_x = g->x0 / (float)atlas->w,
+                                      .u_min_y = g->y0 / (float)atlas->h,
+                                      .u_max_x = g->x1 / (float)atlas->w,
+                                      .u_max_y = g->y1 / (float)atlas->h,
+                                      .r = 1.,
+                                      .g = 1.,
+                                      .b = 1.};
 
     px += g->xadvance;
   }
+  app->editor_glyph_count = ic;
+  app->editor_glyph_is_dirty = true;
 
   return 0;
 }
@@ -89,19 +87,25 @@ int draw_frame(Application *app) {
   {
     vkCmdBindPipeline(current_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       app->pipeline);
-    VkBuffer vertex_buffers[] = {app->geometry_buffer};
-    VkDeviceSize offsets[] = {app->vertex_offset};
-    vkCmdBindVertexBuffers(current_command_buffer, 0, 1, vertex_buffers,
+    VkBuffer vertex_buffers[] = {app->geometry_buffer, app->instance_buffer};
+    VkDeviceSize offsets[] = {app->vertex_offset, 0};
+    vkCmdBindVertexBuffers(current_command_buffer, 0, 2, vertex_buffers,
                            offsets);
     vkCmdBindIndexBuffer(current_command_buffer, app->geometry_buffer,
                          app->index_offset, VK_INDEX_TYPE_UINT16);
+
+    // instance buffer
+    if (app->editor_glyph_is_dirty) {
+      memcpy(app->instance_mapped_array, instances,
+             sizeof(GlyphInstance) * app->editor_glyph_count);
+    }
 
     // uniform
     UniformBufferObject ubo = {};
     ubo.proj = Orthographic_RH_ZO(0.f, (f32)app->swap_extent.width, 0.f,
                                   (f32)app->swap_extent.height, -1.f, 1.f);
 
-    memcpy(app->uniform_buffers_mapped[app->frame_index], &ubo, sizeof(ubo));
+    memcpy(app->uniform_mapped_arrays[app->frame_index], &ubo, sizeof(ubo));
     vkCmdBindDescriptorSets(current_command_buffer,
                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                             app->pipeline_layout, 0, 1,
@@ -114,8 +118,8 @@ int draw_frame(Application *app) {
     vkCmdSetScissor(current_command_buffer, 0., 1.,
                     &(VkRect2D){{0, 0}, app->swap_extent});
 
-    vkCmdDrawIndexed(current_command_buffer, app->editor_glyph_count, 1, 0, 0,
-                     0);
+    vkCmdDrawIndexed(current_command_buffer, indices_count,
+                     app->editor_glyph_count, 0, 0, 0);
   }
 
   rd_end_rendering(app, &current_command_buffer, (u32)image_index);
@@ -147,6 +151,7 @@ void resize(u32 width, u32 height, void *user_data) {
   app->w = width;
   app->h = height;
   rd_resize(app);
+  compute_frame(app);
 
   f64 end_time = now_seconds();
   f64 elapsed = end_time - start_time;
@@ -164,20 +169,13 @@ int main(void) {
     return EXIT_FAILURE;
   }
 
-  Atlas atlas;
   if (init_atlas(app.vulkan_arena,
                  S("/usr/share/fonts/TTF/CaskaydiaMonoNerdFont-Regular.ttf"),
-                 &atlas) != 0) {
+                 &app.atlas) != 0) {
     return EXIT_FAILURE;
   };
 
   plat_get_window_size(&app.plat, &app.w, &app.h);
-  app.editor_viewport = (Viewport){.x = 64,
-                                   .y = 64,
-                                   .w = app.w - 64 * 2,
-                                   .h = app.h - 64 * 2,
-                                   .padding_h = 32,
-                                   .padding_v = 32};
 
   app.editor_cursor = (Cursor){.col = 0, .row = 0};
 
@@ -208,7 +206,7 @@ int main(void) {
         "nostrum.");
 
   // move in loop, update dirty host visible buffer
-  compute_frame(&app, &atlas);
+  compute_frame(&app);
 
   if (!rd_create_instance(&app)) {
     goto cleanup;
@@ -223,12 +221,12 @@ int main(void) {
     goto cleanup;
   }
 
-  rd_upload_bitmap(&app, atlas.data, atlas.w, atlas.h);
+  rd_upload_bitmap(&app, app.atlas.data, app.atlas.w, app.atlas.h);
 
   rd_create_pipeline(&app);
   rd_create_descriptor_set(&app);
 
-  main_loop(&app, &atlas);
+  main_loop(&app, &app.atlas);
   rd_cleanup(&app);
 
   return EXIT_SUCCESS;
