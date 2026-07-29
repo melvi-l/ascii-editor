@@ -46,11 +46,10 @@ typedef struct {
   u32 capacity;
 } QuadInstanceList;
 
-typedef struct Viewport {
-  f32 x, y;
-  f32 w, h;
-  f32 padding_x, padding_y;
-} Viewport;
+typedef struct {
+  f32 x, y, w, h;
+} Rect;
+
 typedef struct Cursor {
   u32 col;
   u32 row;
@@ -73,7 +72,7 @@ typedef struct Atlas {
 typedef struct Application {
   Str editor_text;
   bool editor_quad_is_dirty;
-  Viewport editor_viewport;
+  Rect editor_viewport;
   Cursor editor_cursor;
 
   QuadInstanceList quad_list;

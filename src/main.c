@@ -141,12 +141,19 @@ int compute_frame(Application *app) {
   // printf("window: %u x %u, framebuffer: %u x %u\n", app->w, app->h,
   //        app->swap_extent.width, app->swap_extent.height);
 
-  app->editor_viewport = (Viewport){.x = MARGIN_X,
-                                    .y = MARGIN_Y,
-                                    .w = (f32)app->w - MARGIN_X * 2,
-                                    .h = (f32)app->h - MARGIN_Y * 2,
-                                    .padding_x = PADDING_X,
-                                    .padding_y = PADDING_Y};
+  Rect outer = (Rect){
+      .x = MARGIN_X,
+      .y = MARGIN_Y,
+      .w = (f32)app->w - MARGIN_X * 2,
+      .h = (f32)app->h - MARGIN_Y * 2,
+  };
+
+  app->editor_viewport = (Rect){
+      .x = outer.x + PADDING_X,
+      .y = outer.y + PADDING_Y,
+      .w = outer.w - PADDING_X * 2,
+      .h = outer.h - PADDING_Y * 2,
+  };
   // rect
   {
     render_command_execute(
@@ -155,10 +162,10 @@ int compute_frame(Application *app) {
             .kind = RENDER_COMMAND_RECT,
             .boundingBox =
                 {
-                    .x = (float)app->editor_viewport.x,
-                    .y = (float)app->editor_viewport.y,
-                    .w = (float)app->editor_viewport.w,
-                    .h = (float)app->editor_viewport.h,
+                    .x = outer.x,
+                    .y = outer.y,
+                    .w = outer.w,
+                    .h = outer.h,
                 },
             .rect = {.color = {.R = .05f, .G = .05f, .B = .05f, .A = 1}}},
         &app->quad_list);
@@ -166,10 +173,8 @@ int compute_frame(Application *app) {
 
   // text
   f32 w, h;
-  f32 start_x =
-      (f32)app->editor_viewport.x + (f32)app->editor_viewport.padding_x;
-  f32 start_y =
-      (f32)app->editor_viewport.y + (f32)app->editor_viewport.padding_y;
+  f32 start_x = (f32)app->editor_viewport.x;
+  f32 start_y = (f32)app->editor_viewport.y;
   {
 
     render_command_execute(
@@ -178,8 +183,7 @@ int compute_frame(Application *app) {
             .kind = RENDER_COMMAND_RECT,
             .boundingBox = {.x = start_x,
                             .y = start_y,
-                            .w = (float)app->editor_viewport.w -
-                                 (float)app->editor_viewport.padding_x * 2,
+                            .w = (float)app->editor_viewport.w,
                             .h = (float)app->atlas.line_height},
             .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 0.}}},
         &app->quad_list);
@@ -192,10 +196,8 @@ int compute_frame(Application *app) {
                     {
                         .x = start_x,
                         .y = start_y,
-                        .w = (float)app->editor_viewport.w -
-                             (float)app->editor_viewport.padding_x * 2,
-                        .h = (float)app->editor_viewport.h -
-                             (float)app->editor_viewport.padding_y * 2,
+                        .w = (float)app->editor_viewport.w,
+                        .h = (float)app->editor_viewport.h,
                     },
                 .text = {.str = app->editor_text,
                          .color = {.R = 0., .G = 1., .B = 1., .A = 1.}}},
@@ -203,8 +205,7 @@ int compute_frame(Application *app) {
       fprintf(stderr, "Unable to draw editor text.\n");
     };
     compute_text_size(app, &app->editor_text, &w, &h,
-                      (float)app->editor_viewport.w -
-                          (float)app->editor_viewport.padding_x * 2);
+                      (float)app->editor_viewport.w);
     render_command_execute(
         app,
         (RenderCommand){
@@ -293,14 +294,7 @@ int draw_frame(Application *app) {
 
   // text
   {
-    vkCmdBindPipeline(current_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      app->pipeline);
-    VkBuffer vertex_buffers[] = {app->geometry_buffer, app->instance_buffer};
-    VkDeviceSize offsets[] = {app->vertex_offset, 0};
-    vkCmdBindVertexBuffers(current_command_buffer, 0, 2, vertex_buffers,
-                           offsets);
-    vkCmdBindIndexBuffer(current_command_buffer, app->geometry_buffer,
-                         app->index_offset, VK_INDEX_TYPE_UINT16);
+    rd_bind_pipeline(app, current_command_buffer);
 
     // instance buffer
     if (app->editor_quad_is_dirty) {
@@ -312,18 +306,10 @@ int draw_frame(Application *app) {
     UniformBufferObject ubo = {};
     ubo.proj =
         Orthographic_RH_ZO(0.f, (f32)app->w, 0.f, (f32)app->h, -1.f, 1.f);
-
-    memcpy(app->uniform_mapped_arrays[app->frame_index], &ubo, sizeof(ubo));
-    vkCmdBindDescriptorSets(current_command_buffer,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            app->pipeline_layout, 0, 1,
-                            &app->descriptor_sets[app->frame_index], 0, NULL);
+    rd_upload_uniforms(app, current_command_buffer, ubo);
 
     // dynamic
-    vkCmdSetViewport(current_command_buffer, 0., 1.,
-                     &(VkViewport){0., 0., (f32)app->w, (f32)app->h, 0., 1.});
-    vkCmdSetScissor(current_command_buffer, 0., 1.,
-                    &(VkRect2D){{0, 0}, app->swap_extent});
+    rd_set_dynamic(app, current_command_buffer);
 
     vkCmdDrawIndexed(current_command_buffer, indices_count,
                      app->quad_list.length, 0, 0, 0);

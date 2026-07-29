@@ -1186,6 +1186,34 @@ bool rd_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height) {
   return true;
 }
 
+int rd_bind_pipeline(Application *app, VkCommandBuffer command_buffer) {
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    app->pipeline);
+  VkBuffer vertex_buffers[] = {app->geometry_buffer, app->instance_buffer};
+  VkDeviceSize offsets[] = {app->vertex_offset, 0};
+  vkCmdBindVertexBuffers(command_buffer, 0, 2, vertex_buffers, offsets);
+  vkCmdBindIndexBuffer(command_buffer, app->geometry_buffer, app->index_offset,
+                       VK_INDEX_TYPE_UINT16);
+  return 0;
+}
+
+int rd_upload_uniforms(Application *app, VkCommandBuffer command_buffer,
+                       UniformBufferObject ubo) {
+  memcpy(app->uniform_mapped_arrays[app->frame_index], &ubo, sizeof(ubo));
+  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          app->pipeline_layout, 0, 1,
+                          &app->descriptor_sets[app->frame_index], 0, NULL);
+  return 0;
+}
+
+int rd_set_dynamic(Application *app, VkCommandBuffer command_buffer) {
+  vkCmdSetViewport(command_buffer, 0., 1.,
+                   &(VkViewport){0., 0., (f32)app->w, (f32)app->h, 0., 1.});
+  vkCmdSetScissor(command_buffer, 0., 1.,
+                  &(VkRect2D){{0, 0}, app->swap_extent});
+  return 0;
+}
+
 // @extensions
 bool has_extension(u32 actual_count, VkExtensionProperties *actual_props,
                    const char *const expected) {

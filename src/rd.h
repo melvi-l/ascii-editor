@@ -2,10 +2,6 @@
 
 #include <vulkan/vulkan_core.h>
 
-typedef struct {
-  f32 x, y, w, h;
-} Rect;
-
 typedef enum {
   RENDER_COMMAND_RECT,
   RENDER_COMMAND_IMAGE,
