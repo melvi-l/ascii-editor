@@ -34,10 +34,22 @@
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
+typedef struct {
+  f32 x, y, w, h;
+  f32 u_min_x, u_min_y;
+  f32 u_max_x, u_max_y;
+  f32 r, g, b;
+} QuadInstance;
+typedef struct {
+  QuadInstance *data;
+  u32 length;
+  u32 capacity;
+} QuadInstanceList;
+
 typedef struct Viewport {
-  i32 x, y;
-  u32 w, h;
-  u32 padding_h, padding_v;
+  f32 x, y;
+  f32 w, h;
+  f32 padding_x, padding_y;
 } Viewport;
 typedef struct Cursor {
   u32 col;
@@ -53,14 +65,18 @@ typedef struct Atlas {
 
   f32 font_size, line_height;
   f32 ascent, descent;
+
+  f32 white_x;
+  f32 white_y;
 } Atlas;
 
 typedef struct Application {
   Str editor_text;
-  u32 editor_glyph_count;
-  bool editor_glyph_is_dirty;
+  bool editor_quad_is_dirty;
   Viewport editor_viewport;
   Cursor editor_cursor;
+
+  QuadInstanceList quad_list;
 
   u32 w, h;
 

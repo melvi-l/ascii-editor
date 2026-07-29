@@ -2,16 +2,51 @@
 
 #include <vulkan/vulkan_core.h>
 
+typedef struct {
+  f32 x, y, w, h;
+} Rect;
+
+typedef enum {
+  RENDER_COMMAND_RECT,
+  RENDER_COMMAND_IMAGE,
+  RENDER_COMMAND_TEXT,
+} RenderCommandKind;
+
+typedef struct {
+  Vec4 color;
+} RectRenderData;
+
+typedef struct {
+  // TextureHandle texture;
+  Rect src;
+  Vec4 tint;
+} ImageRenderData;
+
+typedef struct {
+  Str str;
+  f32 font_size;
+  Vec4 color;
+} TextRenderData;
+
+typedef struct {
+  RenderCommandKind kind;
+
+  Rect boundingBox;
+  // Rect clip;
+  // f32 z;
+
+  union {
+    RectRenderData rect;
+    ImageRenderData image;
+    TextRenderData text;
+  };
+} RenderCommand;
+
 typedef struct Vertex {
   f32 x, y;
   f32 u, v;
 } Vertex;
-typedef struct GlyphInstance {
-  f32 x, y, w, h;
-  f32 u_min_x, u_min_y;
-  f32 u_max_x, u_max_y;
-  f32 r, g, b;
-} GlyphInstance;
+
 typedef struct UniformBufferObject {
   Mat4 proj;
 } UniformBufferObject;

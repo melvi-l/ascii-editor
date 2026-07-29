@@ -1,80 +1,287 @@
 #include "main.h"
 
+#include "base.h"
 #include "plat.c"
 #include "rd.c"
 
+#define FONT_SIZE 16
+#define MARGIN 16
+#define MARGIN_X MARGIN
+#define MARGIN_Y MARGIN
+#define PADDING 32
+#define PADDING_X PADDING
+#define PADDING_Y PADDING
+
+#define max_quad_count (1 << 14)
+
 int init_atlas(Arena *arena, Str font_path, Atlas *a);
 
-int compute_frame(Application *app) {
-  Atlas *atlas = &app->atlas;
-
-  printf("window: %u x %u, framebuffer: %u x %u\n", app->w, app->h,
-         app->swap_extent.width, app->swap_extent.height);
-  app->editor_viewport = (Viewport){.x = 64,
-                                    .y = 64,
-                                    .w = app->w - 64 * 2,
-                                    .h = app->h - 64 * 2,
-                                    .padding_h = 32,
-                                    .padding_v = 32};
-  // text
-  u32 ic = 0;
-
-  f32 start_x =
-      (f32)app->editor_viewport.x + (f32)app->editor_viewport.padding_h;
-  f32 start_y =
-      (f32)app->editor_viewport.y + (f32)app->editor_viewport.padding_v;
-  f32 end_x = (f32)app->editor_viewport.x + (f32)app->editor_viewport.w -
-              (f32)app->editor_viewport.padding_h;
-  f32 end_y = (f32)app->editor_viewport.y + (f32)app->editor_viewport.h -
-              (f32)app->editor_viewport.padding_v;
-
-  printf("Compute frame with %f, %f, %f, %f\n", start_x, start_y, end_x, end_y);
-  f32 px = start_x;
-  f32 py = start_y;
-  for (u32 i = 0; i < app->editor_text.length; i++) {
-    u8 c = app->editor_text.data[i];
-
-    if (c == '\n') {
-      px = start_x;
-      py += atlas->line_height;
-      continue;
+static u32 render_command_execute(Application *app, RenderCommand cmd,
+                                  QuadInstanceList *list) {
+  switch (cmd.kind) {
+  case RENDER_COMMAND_RECT:
+    if (list->capacity - list->length <= 0) {
+      fprintf(stderr, "No more capacity in quad instance list\n");
+      return 0;
     }
-
-    if (c < FIRST_CHAR || c >= FIRST_CHAR + CHAR_COUNT)
-      continue;
-
-    stbtt_bakedchar *g = &atlas->glyphs[c - FIRST_CHAR];
-
-    if (px < start_x || px > end_x || py < start_y || py > end_y) {
-      // printf("%c -- out of bound\n", c);
-      // px += g->xadvance;
-      px = start_x;
-      py += atlas->line_height;
-      continue;
-    }
-
-    f32 glyph_x = roundf(px + g->xoff);
-    f32 glyph_y = roundf(py + g->yoff);
-
-    instances[ic++] = (GlyphInstance){
-        .x = glyph_x,
-        .y = glyph_y,
-        .w = (f32)(g->x1 - g->x0),
-        .h = (f32)(g->y1 - g->y0),
-        .u_min_x = (f32)g->x0 / (f32)atlas->w,
-        .u_min_y = (f32)g->y0 / (f32)atlas->h,
-        .u_max_x = (f32)g->x1 / (f32)atlas->w,
-        .u_max_y = (f32)g->y1 / (f32)atlas->h,
-        .r = 1.0f,
-        .g = 1.0f,
-        .b = 1.0f,
+    list->data[list->length++] = (QuadInstance){
+        .x = cmd.boundingBox.x,
+        .y = cmd.boundingBox.y,
+        .w = cmd.boundingBox.w,
+        .h = cmd.boundingBox.h,
+        .u_min_x = app->atlas.white_x,
+        .u_min_y = app->atlas.white_y,
+        .u_max_x = app->atlas.white_x,
+        .u_max_y = app->atlas.white_y,
+        .r = cmd.rect.color.R,
+        .g = cmd.rect.color.G,
+        .b = cmd.rect.color.B,
     };
+    return 1;
+  case RENDER_COMMAND_TEXT:
+    Atlas *atlas = &app->atlas;
+    f32 px = cmd.boundingBox.x;
+    f32 py = cmd.boundingBox.y + (f32)app->atlas.ascent;
+    for (u32 i = 0; i < cmd.text.str.length; i++) {
+      u8 c = cmd.text.str.data[i];
 
+      if (c == '\n') {
+        px = cmd.boundingBox.x;
+        py += atlas->line_height;
+        continue;
+      }
+
+      if (c < FIRST_CHAR || c >= FIRST_CHAR + CHAR_COUNT)
+        continue;
+
+      stbtt_bakedchar *g = &atlas->glyphs[c - FIRST_CHAR];
+
+      if (c == ' ') {
+        px += g->xadvance;
+        continue;
+      }
+
+      if (px < cmd.boundingBox.x ||
+          px > cmd.boundingBox.x + cmd.boundingBox.w //||
+          // py < cmd.boundingBox.y ||
+          // py > cmd.boundingBox.y + cmd.boundingBox.h
+      ) {
+        px = cmd.boundingBox.x;
+        py += atlas->line_height;
+        continue;
+      }
+
+      f32 glyph_x = roundf(px + g->xoff);
+      f32 glyph_y = roundf(py + g->yoff);
+
+      if (list->capacity - list->length <= 0) {
+        return i;
+      }
+
+      list->data[list->length++] = (QuadInstance){
+          .x = glyph_x,
+          .y = glyph_y,
+          .w = (f32)(g->x1 - g->x0),
+          .h = (f32)(g->y1 - g->y0),
+          .u_min_x = (f32)g->x0 / (f32)atlas->w,
+          .u_min_y = (f32)g->y0 / (f32)atlas->h,
+          .u_max_x = (f32)g->x1 / (f32)atlas->w,
+          .u_max_y = (f32)g->y1 / (f32)atlas->h,
+          .r = cmd.text.color.R,
+          .g = cmd.text.color.G,
+          .b = cmd.text.color.B,
+          // .a = cmd.rect.color.A,
+      };
+
+      px += g->xadvance;
+    }
+
+    return (u32)cmd.text.str.length;
+
+  case RENDER_COMMAND_IMAGE:
+    return 0;
+
+  default:
+    fprintf(stderr, "Unknown render command kind.\n");
+    return 0;
+  }
+}
+
+// TODO: add wrapping flag
+int compute_text_size(Application *app, Str *str, f32 *width, f32 *height,
+                      f32 max_width) {
+
+  Atlas atlas = app->atlas;
+  f32 px = 0;
+  *width = 0, *height = atlas.line_height;
+  for (u32 i = 0; i < str->length; i++) {
+    u8 *c = &str->data[i];
+
+    if (*c == '\n' || (max_width != 0 && px > max_width)) {
+      *height += atlas.line_height;
+      *width = max(*width, px);
+      px = 0;
+      continue;
+    }
+
+    if (*c < FIRST_CHAR || *c >= FIRST_CHAR + CHAR_COUNT)
+      continue;
+
+    stbtt_bakedchar *g = &atlas.glyphs[*c - FIRST_CHAR];
     px += g->xadvance;
   }
-  app->editor_glyph_count = ic;
-  app->editor_glyph_is_dirty = true;
 
+  // *height += atlas.line_height;
+  *width = max(*width, px);
+  return 0;
+}
+
+int compute_frame(Application *app) {
+  app->quad_list.length = 0;
+  // printf("window: %u x %u, framebuffer: %u x %u\n", app->w, app->h,
+  //        app->swap_extent.width, app->swap_extent.height);
+
+  app->editor_viewport = (Viewport){.x = MARGIN_X,
+                                    .y = MARGIN_Y,
+                                    .w = (f32)app->w - MARGIN_X * 2,
+                                    .h = (f32)app->h - MARGIN_Y * 2,
+                                    .padding_x = PADDING_X,
+                                    .padding_y = PADDING_Y};
+  // rect
+  {
+    render_command_execute(
+        app,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .boundingBox =
+                {
+                    .x = (float)app->editor_viewport.x,
+                    .y = (float)app->editor_viewport.y,
+                    .w = (float)app->editor_viewport.w,
+                    .h = (float)app->editor_viewport.h,
+                },
+            .rect = {.color = {.R = .05f, .G = .05f, .B = .05f, .A = 1}}},
+        &app->quad_list);
+  }
+
+  // text
+  f32 w, h;
+  f32 start_x =
+      (f32)app->editor_viewport.x + (f32)app->editor_viewport.padding_x;
+  f32 start_y =
+      (f32)app->editor_viewport.y + (f32)app->editor_viewport.padding_y;
+  {
+
+    render_command_execute(
+        app,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .boundingBox = {.x = start_x,
+                            .y = start_y,
+                            .w = (float)app->editor_viewport.w -
+                                 (float)app->editor_viewport.padding_x * 2,
+                            .h = (float)app->atlas.line_height},
+            .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 0.}}},
+        &app->quad_list);
+
+    if (render_command_execute(
+            app,
+            (RenderCommand){
+                .kind = RENDER_COMMAND_TEXT,
+                .boundingBox =
+                    {
+                        .x = start_x,
+                        .y = start_y,
+                        .w = (float)app->editor_viewport.w -
+                             (float)app->editor_viewport.padding_x * 2,
+                        .h = (float)app->editor_viewport.h -
+                             (float)app->editor_viewport.padding_y * 2,
+                    },
+                .text = {.str = app->editor_text,
+                         .color = {.R = 0., .G = 1., .B = 1., .A = 1.}}},
+            &app->quad_list) != app->editor_text.length) {
+      fprintf(stderr, "Unable to draw editor text.\n");
+    };
+    compute_text_size(app, &app->editor_text, &w, &h,
+                      (float)app->editor_viewport.w -
+                          (float)app->editor_viewport.padding_x * 2);
+    render_command_execute(
+        app,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .boundingBox =
+                {
+                    .x = start_x,
+                    .y = start_y + h,
+                    .w = w,
+                    .h = 4,
+                },
+            .rect = {.color = {.R = 0., .G = 1., .B = .0, .A = 0.}}},
+        &app->quad_list);
+  }
+
+  // button
+  {
+
+    Str button_text =
+        S("click me\nplease\nidk what i am about to seses eses\ne\nesesesesse");
+    f32 width, height;
+    if (compute_text_size(app, &button_text, &width, &height, 0) != 0) {
+      fprintf(stderr, "Unable to compute text size.\n");
+      return 1;
+    };
+    // printf("computed size: %f %f\n", width, height);
+    Rect button = {
+        .x = 256, .y = h + 256, .w = width + 2 * 32, .h = height + 2 * 16};
+
+    Rect inner = {
+        .x = button.x + 32, .y = button.y + 16, .w = width, .h = height};
+
+    render_command_execute(
+        app,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .boundingBox =
+                {
+                    .x = (float)button.x,
+                    .y = (float)button.y,
+                    .w = (float)button.w,
+                    .h = (float)button.h,
+                },
+            .rect = {.color = {.R = 0., .G = 0., .B = .5, .A = 0.}}},
+        &app->quad_list);
+
+    render_command_execute(
+        app,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .boundingBox =
+                {
+                    .x = inner.x,
+                    .y = inner.y,
+                    .w = inner.w,
+                    .h = inner.h,
+                },
+            .rect = {.color = {.R = .5, .G = 0., .B = 0., .A = 0.}}},
+        &app->quad_list);
+
+    render_command_execute(
+        app,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_TEXT,
+            .boundingBox =
+                {
+                    .x = inner.x,
+                    .y = inner.y,
+                    .w = inner.w,
+                    .h = inner.h,
+                },
+            .text = {.str = button_text,
+                     .color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
+        &app->quad_list);
+  }
+
+  app->editor_quad_is_dirty = true;
   return 0;
 }
 
@@ -96,9 +303,9 @@ int draw_frame(Application *app) {
                          app->index_offset, VK_INDEX_TYPE_UINT16);
 
     // instance buffer
-    if (app->editor_glyph_is_dirty) {
-      memcpy(app->instance_mapped_array, instances,
-             sizeof(GlyphInstance) * app->editor_glyph_count);
+    if (app->editor_quad_is_dirty) {
+      memcpy(app->instance_mapped_array, app->quad_list.data,
+             sizeof(QuadInstance) * app->quad_list.length);
     }
 
     // uniform
@@ -119,7 +326,7 @@ int draw_frame(Application *app) {
                     &(VkRect2D){{0, 0}, app->swap_extent});
 
     vkCmdDrawIndexed(current_command_buffer, indices_count,
-                     app->editor_glyph_count, 0, 0, 0);
+                     app->quad_list.length, 0, 0, 0);
   }
 
   rd_end_rendering(app, &current_command_buffer, (u32)image_index);
@@ -133,6 +340,7 @@ void main_loop(Application *app, Atlas *atlas) {
   Timer second_timer = {.interval = 1.};
   while (!plat_should_close(&app->plat)) {
     plat_poll_events();
+    compute_frame(app);
     draw_frame(app);
     f64 fps = plat_compute_fps();
     if (timer_tick(&second_timer)) {
@@ -165,13 +373,20 @@ int main(void) {
       .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
   };
 
+  app.quad_list = (QuadInstanceList){
+      .data = ARENA_PUSH_ARRAY(app.vulkan_arena, max_quad_count, QuadInstance),
+      .length = 0,
+      .capacity = max_quad_count,
+  };
+
   if (plat_init(&app.plat, resize, &app) != 0) {
     return EXIT_FAILURE;
   }
 
-  if (init_atlas(app.vulkan_arena,
-                 S("/usr/share/fonts/TTF/RobotoMono-Regular.ttf"),
-                 &app.atlas) != 0) {
+  if (init_atlas(
+          app.vulkan_arena,
+          S("/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf"),
+          &app.atlas) != 0) {
     return EXIT_FAILURE;
   };
 
@@ -242,7 +457,7 @@ cleanup:
 
 // @font-atlas
 int init_atlas(Arena *arena, Str font_path, Atlas *a) {
-  *a = (Atlas){.w = 512, .h = 512, .font_size = 28};
+  *a = (Atlas){.w = 512, .h = 512, .font_size = FONT_SIZE};
   a->data = ARENA_PUSH_ARRAY(arena, a->w * a->h, u8);
 
   Str ttf_file;
@@ -261,7 +476,6 @@ int init_atlas(Arena *arena, Str font_path, Atlas *a) {
   a->ascent = (float)ascent * scale;
   a->descent = (float)descent * scale;
   a->line_height = (float)(ascent - descent + line_gap) * scale;
-  printf("%f\n", a->line_height);
 
   if (!stbtt_BakeFontBitmap(ttf_file.data, 0, a->font_size, a->data, (int)a->w,
                             (int)a->h, FIRST_CHAR, CHAR_COUNT, a->glyphs)) {
@@ -269,6 +483,39 @@ int init_atlas(Arena *arena, Str font_path, Atlas *a) {
     fprintf(stderr, "Unable to bake font atlas bitmap.\n");
     return -1;
   }
+
+  // white texture area to draw rect
+  u32 max_glyph_y = 0;
+
+  for (u32 i = 0; i < CHAR_COUNT; ++i) {
+    if (a->glyphs[i].y1 > max_glyph_y) {
+      max_glyph_y = a->glyphs[i].y1;
+    }
+  }
+
+  const u32 white_region_size = 4;
+  const u32 white_region_padding = 2;
+
+  u32 white_x = white_region_padding;
+  u32 white_y = max_glyph_y + white_region_padding;
+
+  if (white_x + white_region_size > (u32)a->w ||
+      white_y + white_region_size > (u32)a->h) {
+    fprintf(stderr, "No room left for the white atlas region.\n");
+    return -1;
+  }
+
+  for (u32 y = 0; y < white_region_size; ++y) {
+    for (u32 x = 0; x < white_region_size; ++x) {
+      u32 atlas_x = white_x + x;
+      u32 atlas_y = white_y + y;
+
+      a->data[atlas_y * a->w + atlas_x] = 255;
+    }
+  }
+
+  a->white_x = ((f32)white_x + (f32)white_region_size * 0.5f) / (f32)a->w;
+  a->white_y = ((f32)white_y + (f32)white_region_size * 0.5f) / (f32)a->h;
 
   return 0;
 }

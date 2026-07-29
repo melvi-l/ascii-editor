@@ -12,8 +12,6 @@ static Vertex vertices[vertices_count] = {
 };
 #define indices_count 6
 static u16 indices[indices_count] = {0, 2, 1, 1, 2, 3};
-#define max_glyph_count (1 << 14)
-static GlyphInstance instances[max_glyph_count];
 
 #ifdef VK_ENABLE_VALIDATION
 static const bool is_validation_enabled = 1;
@@ -329,8 +327,8 @@ static bool rd_init(Application *app) {
     }
 
     // host visible + keep map memory
-    VkDeviceSize instance_size = sizeof(instances[0]) * max_glyph_count;
-
+    VkDeviceSize instance_size =
+        sizeof(app->quad_list.data[0]) * app->quad_list.capacity;
     app->instance_mapped_array =
         ARENA_PUSH_ARRAY(app->vulkan_arena, instance_size, u8);
 
@@ -795,7 +793,7 @@ bool rd_create_pipeline(Application *app) {
        .stride = sizeof(Vertex),
        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX},
       {.binding = 1,
-       .stride = sizeof(GlyphInstance),
+       .stride = sizeof(QuadInstance),
        .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE}};
   VkVertexInputAttributeDescription attributes[7] = {
       {.location = 0,
@@ -809,23 +807,23 @@ bool rd_create_pipeline(Application *app) {
       {.location = 2,
        .binding = 1,
        .format = VK_FORMAT_R32G32_SFLOAT,
-       .offset = offsetof(GlyphInstance, x)},
+       .offset = offsetof(QuadInstance, x)},
       {.location = 3,
        .binding = 1,
        .format = VK_FORMAT_R32G32_SFLOAT,
-       .offset = offsetof(GlyphInstance, w)},
+       .offset = offsetof(QuadInstance, w)},
       {.location = 4,
        .binding = 1,
        .format = VK_FORMAT_R32G32_SFLOAT,
-       .offset = offsetof(GlyphInstance, u_min_x)},
+       .offset = offsetof(QuadInstance, u_min_x)},
       {.location = 5,
        .binding = 1,
        .format = VK_FORMAT_R32G32_SFLOAT,
-       .offset = offsetof(GlyphInstance, u_max_x)},
+       .offset = offsetof(QuadInstance, u_max_x)},
       {.location = 6,
        .binding = 1,
        .format = VK_FORMAT_R32G32B32_SFLOAT,
-       .offset = offsetof(GlyphInstance, r)}};
+       .offset = offsetof(QuadInstance, r)}};
   VkPipelineVertexInputStateCreateInfo vertex_input_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
       .vertexBindingDescriptionCount = 2,
