@@ -64,6 +64,7 @@ typedef struct Atlas {
 
   f32 font_size, line_height;
   f32 ascent, descent;
+  f32 advance;
 
   f32 white_x;
   f32 white_y;

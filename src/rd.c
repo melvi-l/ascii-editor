@@ -758,6 +758,11 @@ bool rd_create_pipeline(Application *app) {
   Str shader_code = {0};
   read_file(scratch.arena, S("./build/shaders/text.spv"), &shader_code);
 
+  if (shader_code.length % 4 != 0) {
+    fprintf(stderr, "Shader byte code is not multiple of 4\n");
+    return false;
+  }
+
   VkShaderModule shader_module;
   VkShaderModuleCreateInfo createInfo = {
       .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,

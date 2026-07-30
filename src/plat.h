@@ -7,12 +7,16 @@
 #include <GLFW/glfw3.h>
 
 typedef void (*PlatResizeCallback)(u32 width, u32 height, void *user_data);
+typedef void (*PlatCharCallback)(u32 c, void *user_data);
+typedef void (*PlatKeyCallback)(i32 key, i32 scancode, i32 action, i32 mods, void *user_data);
 typedef GLFWwindow PlatWindow;
 typedef struct {
   PlatWindow *window;
 
   PlatResizeCallback resize_callback;
-  void *resize_user_data;
+  PlatCharCallback char_callback;
+  PlatKeyCallback key_callback;
+  void *user_data;
 } Platform;
 
 int plat_init(Platform *plat, PlatResizeCallback resize_callback,

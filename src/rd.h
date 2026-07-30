@@ -27,7 +27,7 @@ typedef struct {
 typedef struct {
   RenderCommandKind kind;
 
-  Rect boundingBox;
+  Rect bounding_box;
   // Rect clip;
   // f32 z;
 

@@ -627,11 +627,6 @@ bool read_file(Arena *arena, Str path, Str *out) {
     return false;
   }
 
-  if (file_size % 4 != 0) {
-    fprintf(stderr, "Shader byte code is not multiple of 4\n");
-    return false;
-  }
-
   out->length = (u64)file_size;
   out->data = buffer;
 
