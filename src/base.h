@@ -30,6 +30,7 @@ typedef double f64;
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define max(a, b) (((a) < (b)) ? (b) : (a))
+#define sign(i) ((i) > 0) - ((i) < 0)
 #define clamp(x, lo, hi) (max((lo), min((x), (hi))))
 
 #define B_FMT(b) ((b)) ? "true" : "false"

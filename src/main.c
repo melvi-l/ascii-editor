@@ -149,13 +149,64 @@ int compute_text_size(Application *app, Str str, f32 *width, f32 *height,
 }
 
 // TODO leverage tree like datastructrue
-int compute_cursor_position(Application *app, Cursor cursor, Str text,
-                            Rect *rect) {
+int compute_cursor(Cursor *cursor, Str text, i32 d_row, i32 d_col) {
+  i32 text_advance = 0;
+  i32 row_advance = 0;
+  i32 col_advance = 0;
+  i32 d_row_sign = sign(d_row);
+
+  // row
+  while (row_advance != d_row) {
+    printf("advance %i row\n", row_advance);
+    if ((i32)cursor->text_pos + text_advance < 0 ||
+        (i32)cursor->text_pos + text_advance > (i32)text.length) {
+      break;
+    }
+    // find next row
+    while ((i32)cursor->text_pos + text_advance >= 0 ||
+           (i32)cursor->text_pos + text_advance <= (i32)text.length) {
+      if (text.data[(i32)cursor->text_pos + text_advance] == '\n') {
+        row_advance += d_row_sign;
+        break;
+      }
+      text_advance += d_row_sign;
+    }
+    text_advance += d_row_sign;
+  }
+
+  // commit text_advance
+  cursor->text_pos = (u32)((i32)cursor->text_pos + text_advance);
+  cursor->_row = (u32)((i32)cursor->_row + row_advance);
+
+  if (row_advance != 0) {
+    d_col += (i32)cursor->desired_col;
+    cursor->_col = 0;
+  }
+
+  // try to reach the desired col
+  i32 d_col_sign = sign(d_col);
+  while ((i32)cursor->text_pos + col_advance >= 0 ||
+         (i32)cursor->text_pos + col_advance <= (i32)text.length) {
+    printf("advance %i col\n", col_advance);
+    if (text.data[(i32)cursor->text_pos + col_advance] == '\n') {
+      break;
+    }
+    if ((i32)cursor->_col + col_advance >= d_col) {
+      break;
+    }
+    col_advance += d_col_sign;
+  }
+  cursor->_col = (u32)((i32)cursor->_col + col_advance);
+  cursor->text_pos = (u32)((i32)cursor->text_pos + col_advance);
+  return text_advance + col_advance;
+}
+//
+int compute_cursor_rect(Application *app, Cursor cursor, Str text, Rect *rect) {
   // compute per line x offset
   (void)&text;
   *rect = (Rect){
-      .x = app->editor_viewport.x + app->atlas.advance * (f32)cursor.col,
-      .y = app->editor_viewport.y + app->atlas.line_height * (f32)cursor.row,
+      .x = app->editor_viewport.x + app->atlas.advance * (f32)cursor._col,
+      .y = app->editor_viewport.y + app->atlas.line_height * (f32)cursor._row,
       .w = 2,
       .h = app->atlas.line_height};
 
@@ -237,8 +288,7 @@ int compute_frame(Application *app) {
 
   // cursor
   Rect cursor_rect;
-  compute_cursor_position(app, app->editor_cursor, app->editor_text,
-                          &cursor_rect);
+  compute_cursor_rect(app, app->editor_cursor, app->editor_text, &cursor_rect);
   render_command_execute(
       app,
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
@@ -329,17 +379,17 @@ void on_key(i32 key, i32 scancode, i32 action, i32 mods, void *user_data) {
   assert(app != NULL);
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
     if (key == GLFW_KEY_UP) {
-      app->editor_cursor.row--;
+      compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
     }
     if (key == GLFW_KEY_DOWN) {
-      app->editor_cursor.row++;
+      compute_cursor(&app->editor_cursor, app->editor_text, 1, 0);
     }
 
     if (key == GLFW_KEY_LEFT) {
-      app->editor_cursor.col--;
+      compute_cursor(&app->editor_cursor, app->editor_text, 0, -1);
     }
     if (key == GLFW_KEY_RIGHT) {
-      app->editor_cursor.col++;
+      compute_cursor(&app->editor_cursor, app->editor_text, 0, 1);
     }
   }
   printf("on_key %c\n", key);
@@ -382,7 +432,7 @@ int main(int argc, char **argv) {
 
   plat_get_window_size(&app.plat, &app.w, &app.h);
 
-  app.editor_cursor = (Cursor){.col = 0, .row = 0};
+  app.editor_cursor = (Cursor){.text_pos = 0, ._col = 0, ._row = 0};
 
   if (!read_file(app.vulkan_arena, filepath, &app.editor_text)) {
     fprintf(stderr, "Unable to open editor file\n");

@@ -51,8 +51,10 @@ typedef struct {
 } Rect;
 
 typedef struct Cursor {
-  u32 col;
-  u32 row;
+  u32 text_pos;
+  u32 _col;
+  u32 _row;
+  u32 desired_col;
 } Cursor;
 
 typedef struct Atlas {
