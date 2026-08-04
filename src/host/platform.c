@@ -1,4 +1,4 @@
-#include "plat.h"
+#include "host/platform.h"
 #include <GLFW/glfw3.h>
 
 void plat_resize(GLFWwindow *window, int width, int height) {

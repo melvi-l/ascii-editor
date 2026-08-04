@@ -1,4 +1,7 @@
-#include "main.h"
+#ifndef VULKAN_H
+#define VULKAN_H
+
+#include "common/common.h"
 
 #include <vulkan/vulkan_core.h>
 
@@ -47,10 +50,6 @@ typedef struct UniformBufferObject {
   Mat4 proj;
 } UniformBufferObject;
 
-static bool rd_create_instance(Application *app);
-static bool rd_init(Application *app);
-static void rd_cleanup(Application *app);
-static bool rd_resize(Application *app);
 bool rd_create_pipeline(Application *app);
 bool rd_create_descriptor_set(Application *app);
 bool rd_upload_bitmap(Application *app, u8 *bitmap, u32 width, u32 height);
@@ -92,3 +91,14 @@ void transition_image_layout(
     u32 dst_queue_family_index, VkImageAspectFlagBits image_aspect);
 
 bool find_depth_format(Application *app, VkFormat *out);
+
+i32 rd_begin_rendering(Application *app,
+                       VkCommandBuffer *current_command_buffer);
+bool rd_end_rendering(Application *app, VkCommandBuffer *current_command_buffer,
+                      u32 image_index);
+int rd_bind_pipeline(Application *app, VkCommandBuffer command_buffer);
+int rd_upload_uniforms(Application *app, VkCommandBuffer command_buffer,
+                       UniformBufferObject ubo);
+int rd_set_dynamic(Application *app, VkCommandBuffer command_buffer);
+
+#endif // VULKAN_H

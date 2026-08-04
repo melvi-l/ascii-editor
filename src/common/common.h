@@ -1,24 +1,18 @@
-#ifndef MAIN_H
-#define MAIN_H
+#ifndef COMMON_H
+#define COMMON_H
 
-#define BASE_IMPLEMENTATION
-#include "base.h"
+// NOTE: host/main.c defines BASE_IMPLEMENTATION and STB_TRUETYPE_IMPLEMENTATION
+// before including this header. lib/main.c does not -> declarations only.
+#include "common/base.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 
-#include "plat.h"
+#include "host/platform.h"
 
 #include "lib/math.h"
 
-// #define STB_IMAGE_IMPLEMENTATION
-// #include "lib/image.h"
-
-// #define STB_IMAGE_WRITE_IMPLEMENTATION
-// #include "lib/image_write.h"
-
-#define STB_TRUETYPE_IMPLEMENTATION
 #include "lib/font.h"
 
 #pragma GCC diagnostic pop
@@ -151,4 +145,6 @@ typedef struct Application {
 #define FIRST_CHAR 32
 #define CHAR_COUNT 96
 
-#endif
+#define max_quad_count (1 << 14)
+
+#endif // COMMON_H

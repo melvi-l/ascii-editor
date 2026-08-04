@@ -1,7 +1,7 @@
-#ifndef PLAT_H
-#define PLAT_H
+#ifndef PLATFORM_H
+#define PLATFORM_H
 
-#include "base.h"
+#include "common/base.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -37,4 +37,4 @@ void plat_poll_events();
 
 f64 plat_compute_fps();
 
-#endif
+#endif // PLATFORM_H

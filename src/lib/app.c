@@ -1,8 +1,6 @@
-#include "main.h"
-
-#include "base.h"
-#include "plat.c"
-#include "rd.c"
+#include "common/common.h"
+#include "host/vulkan.h"
+#include <vulkan/vulkan_core.h>
 
 #define FONT_SIZE 16
 #define MARGIN 16
@@ -12,9 +10,8 @@
 #define PADDING_X PADDING
 #define PADDING_Y PADDING
 
-#define max_quad_count (1 << 14)
-
-int init_atlas(Arena *arena, Str font_path, Atlas *a);
+// mirror of rd.c quad indices (same TU-independent macro)
+#define indices_count 6
 
 static u32 render_command_execute(Application *app, RenderCommand cmd,
                                   QuadInstanceList *list) {
@@ -208,8 +205,7 @@ int compute_cursor(Cursor *cursor, Str text, i32 d_row, i32 d_col) {
     row_advance--;
   }
 
-  i32 current_col = cursor->_col;
-  assert(current_col == old_pos - current_line_start);
+  i32 current_col = old_pos - current_line_start;
   i32 target_col;
 
   if (row_advance != 0) {
@@ -258,8 +254,6 @@ int compute_cursor_rect(Application *app, Cursor cursor, Str text, Rect *rect) {
 
 int compute_frame(Application *app) {
   app->quad_list.length = 0;
-  // printf("window: %u x %u, framebuffer: %u x %u\n", app->w, app->h,
-  //        app->swap_extent.width, app->swap_extent.height);
 
   Rect outer = (Rect){
       .x = MARGIN_X,
@@ -275,18 +269,11 @@ int compute_frame(Application *app) {
       .h = outer.h - PADDING_Y * 2,
   };
 
-  Rect information_outer = (Rect){
+  Rect information_viewport = {
       .x = outer.x,
-      .y = outer.h,
+      .y = outer.y + outer.h - 64,
       .w = outer.w,
       .h = 64,
-  };
-
-  Rect information_inner = (Rect){
-      .x = information_outer.x + 8,
-      .y = information_outer.y + 8,
-      .w = information_outer.w - 16,
-      .h = information_outer.h - 16,
   };
   // rect
   {
@@ -313,7 +300,7 @@ int compute_frame(Application *app) {
                 .kind = RENDER_COMMAND_TEXT,
                 .bounding_box = app->editor_viewport,
                 .text = {.str = app->editor_text,
-                         .color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
+                         .color = {.R = 1., .G = 1., .B = 1., .A = .8f}}},
             &app->quad_list) != app->editor_text.length) {
       fprintf(stderr, "Unable to draw editor text.\n");
     };
@@ -343,28 +330,26 @@ int compute_frame(Application *app) {
       app,
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
                       .bounding_box = cursor_rect,
-                      .rect = {.color = {.R = 1., .G = 1., .B = 0., .A = 1.}}},
+                      .rect = {.color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
       &app->quad_list);
 
   // information
   ArenaTemp temp = arena_temp_begin(app->scratch_arena);
   Str information_str = str_format(
-      temp.arena, "col=%u; row=%u; text_advance=%u; current_char=%c;",
-      app->editor_cursor._col, app->editor_cursor._row,
-      app->editor_cursor.text_pos,
-      app->editor_text.data[app->editor_cursor.text_pos]);
+      temp.arena, "col=%u ; row=%u ;\ntext_advance=%u", app->editor_cursor._col,
+      app->editor_cursor._row, app->editor_cursor.text_pos);
   render_command_execute(
       app,
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
-                      .bounding_box = information_outer,
-                      .rect = {.color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
+                      .bounding_box = information_viewport,
+                      .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 1.}}},
       &app->quad_list);
   render_command_execute(
       app,
       (RenderCommand){.kind = RENDER_COMMAND_TEXT,
-                      .bounding_box = information_inner,
+                      .bounding_box = information_viewport,
                       .text = {.str = information_str,
-                               .color = {.R = 0., .G = 0., .B = 0., .A = 1.}}},
+                               .color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
       &app->quad_list);
 
   app->editor_quad_is_dirty = true;
@@ -405,49 +390,16 @@ int draw_frame(Application *app) {
   return 0;
 }
 
-// @main loop
-void main_loop(Application *app, Atlas *atlas) {
-  (void)atlas;
-  Timer second_timer = {.interval = 1.};
-  while (!plat_should_close(&app->plat)) {
-    plat_poll_events();
-    compute_frame(app);
-    draw_frame(app);
-    // f64 fps = plat_compute_fps();
-    if (timer_tick(&second_timer)) {
-      // printf("FPS: %.1f\n", fps);
-    }
-  }
-}
-
-void resize(u32 width, u32 height, void *user_data) {
-  Application *app = user_data;
-  if (app == NULL)
-    return;
-
-  f64 start_time = now_seconds();
-
-  app->w = width;
-  app->h = height;
-  rd_resize(app);
+// @lib-callbacks
+void on_resize(Application *app, u32 w, u32 h) {
+  app->w = w;
+  app->h = h;
   compute_frame(app);
-
-  f64 end_time = now_seconds();
-  f64 elapsed = end_time - start_time;
-  printf("resizing take %.2fms.\n", elapsed * 1000);
 }
 
-void on_char(u32 codepoint, void *user_data) {
-  Application *app = user_data;
-  assert(app != NULL);
-  printf("on_char %c\n", codepoint);
-}
-
-void on_key(i32 key, i32 scancode, i32 action, i32 mods, void *user_data) {
+void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
   (void)scancode;
   (void)mods;
-  Application *app = user_data;
-  assert(app != NULL);
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
     if (key == GLFW_KEY_UP) {
       compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
@@ -465,144 +417,7 @@ void on_key(i32 key, i32 scancode, i32 action, i32 mods, void *user_data) {
   }
 }
 
-// @main
-int main(int argc, char **argv) {
-  Str filepath;
-  if (argc < 2) {
-    filepath = S("lorem.txt");
-  } else {
-    filepath = S_line(argv[1]);
-  }
-
-  printf("%*s\n", STR_FMT(filepath));
-  Application app = {
-      .vulkan_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
-      .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
-  };
-
-  app.quad_list = (QuadInstanceList){
-      .data = ARENA_PUSH_ARRAY(app.vulkan_arena, max_quad_count, QuadInstance),
-      .length = 0,
-      .capacity = max_quad_count,
-  };
-
-  if (plat_init(&app.plat, resize, &app) != 0) {
-    return EXIT_FAILURE;
-  }
-
-  plat_set_char_callback(&app.plat, on_char);
-  plat_set_key_callback(&app.plat, on_key);
-
-  if (init_atlas(
-          app.vulkan_arena,
-          S("/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf"),
-          &app.atlas) != 0) {
-    return EXIT_FAILURE;
-  };
-
-  plat_get_window_size(&app.plat, &app.w, &app.h);
-
-  app.editor_cursor = (Cursor){.text_pos = 0, ._col = 0, ._row = 0};
-
-  if (!read_file(app.vulkan_arena, filepath, &app.editor_text)) {
-    fprintf(stderr, "Unable to open editor file\n");
-    goto cleanup;
-  }
-
-  // move in loop, update dirty host visible buffer
-  compute_frame(&app);
-
-  if (!rd_create_instance(&app)) {
-    goto cleanup;
-  }
-
-  if (!plat_create_vulkan_surface(app.plat.window, app.instance, NULL,
-                                  &app.surface)) {
-    goto cleanup;
-  };
-
-  if (!rd_init(&app)) {
-    goto cleanup;
-  }
-
-  rd_upload_bitmap(&app, app.atlas.data, app.atlas.w, app.atlas.h);
-
-  rd_create_pipeline(&app);
-  rd_create_descriptor_set(&app);
-
-  main_loop(&app, &app.atlas);
-  rd_cleanup(&app);
-
-  return EXIT_SUCCESS;
-
-cleanup:
-  rd_cleanup(&app);
-  return EXIT_FAILURE;
-}
-
-// @font-atlas
-int init_atlas(Arena *arena, Str font_path, Atlas *a) {
-  *a = (Atlas){.w = 512, .h = 512, .font_size = FONT_SIZE};
-  a->data = ARENA_PUSH_ARRAY(arena, a->w * a->h, u8);
-
-  Str ttf_file;
-  read_file(arena, font_path, &ttf_file);
-
-  stbtt_fontinfo font_info;
-  if (!stbtt_InitFont(&font_info, ttf_file.data, 0)) {
-    fprintf(stderr, "Unable to init font.\n");
-    return -1;
-  };
-
-  int ascent, descent, line_gap;
-  stbtt_GetFontVMetrics(&font_info, &ascent, &descent, &line_gap);
-  f32 scale = stbtt_ScaleForPixelHeight(&font_info, a->font_size);
-
-  a->ascent = (float)ascent * scale;
-  a->descent = (float)descent * scale;
-  a->line_height = (float)(ascent - descent + line_gap) * scale;
-
-  if (!stbtt_BakeFontBitmap(ttf_file.data, 0, a->font_size, a->data, (int)a->w,
-                            (int)a->h, FIRST_CHAR, CHAR_COUNT, a->glyphs)) {
-
-    fprintf(stderr, "Unable to bake font atlas bitmap.\n");
-    return -1;
-  }
-
-  stbtt_bakedchar *g = &a->glyphs[' ' - FIRST_CHAR];
-  a->advance = (float)g->xadvance;
-  // white texture area to draw rect
-  u32 max_glyph_y = 0;
-
-  for (u32 i = 0; i < CHAR_COUNT; ++i) {
-    if (a->glyphs[i].y1 > max_glyph_y) {
-      max_glyph_y = a->glyphs[i].y1;
-    }
-  }
-
-  const u32 white_region_size = 4;
-  const u32 white_region_padding = 2;
-
-  u32 white_x = white_region_padding;
-  u32 white_y = max_glyph_y + white_region_padding;
-
-  if (white_x + white_region_size > (u32)a->w ||
-      white_y + white_region_size > (u32)a->h) {
-    fprintf(stderr, "No room left for the white atlas region.\n");
-    return -1;
-  }
-
-  for (u32 y = 0; y < white_region_size; ++y) {
-    for (u32 x = 0; x < white_region_size; ++x) {
-      u32 atlas_x = white_x + x;
-      u32 atlas_y = white_y + y;
-
-      a->data[atlas_y * a->w + atlas_x] = 255;
-    }
-  }
-
-  a->white_x = ((f32)white_x + (f32)white_region_size * 0.5f) / (f32)a->w;
-  a->white_y = ((f32)white_y + (f32)white_region_size * 0.5f) / (f32)a->h;
-
-  return 0;
+void on_char_input(Application *app, u32 c) {
+  (void)app;
+  printf("on_char %c\n", c);
 }

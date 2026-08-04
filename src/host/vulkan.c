@@ -1,6 +1,5 @@
-#include "rd.h"
-#include "base.h"
-#include "main.h"
+#include "host/vulkan.h"
+#include "common/common.h"
 #include <vulkan/vulkan_core.h>
 
 #define vertices_count 4
@@ -12,6 +11,11 @@ static Vertex vertices[vertices_count] = {
 };
 #define indices_count 6
 static u16 indices[indices_count] = {0, 2, 1, 1, 2, 3};
+
+static bool rd_create_instance(Application *app);
+static bool rd_init(Application *app);
+static void rd_cleanup(Application *app);
+static bool rd_resize(Application *app);
 
 #ifdef VK_ENABLE_VALIDATION
 static const bool is_validation_enabled = 1;
@@ -756,7 +760,7 @@ bool rd_create_pipeline(Application *app) {
   ArenaTemp scratch = arena_temp_begin(app->scratch_arena);
 
   Str shader_code = {0};
-  read_file(scratch.arena, S("./build/shaders/text.spv"), &shader_code);
+  read_file(scratch.arena, S("./build/shaders/quad.spv"), &shader_code);
 
   if (shader_code.length % 4 != 0) {
     fprintf(stderr, "Shader byte code is not multiple of 4\n");
@@ -827,7 +831,7 @@ bool rd_create_pipeline(Application *app) {
        .offset = offsetof(QuadInstance, u_max_x)},
       {.location = 6,
        .binding = 1,
-       .format = VK_FORMAT_R32G32B32_SFLOAT,
+       .format = VK_FORMAT_R32G32B32A32_SFLOAT,
        .offset = offsetof(QuadInstance, r)}};
   VkPipelineVertexInputStateCreateInfo vertex_input_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -892,14 +896,16 @@ bool rd_create_pipeline(Application *app) {
       .attachmentCount = 1,
       .pAttachments = &color_blend_attachment};
 
-  VkPipelineLayoutCreateInfo pipeline_layout_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .setLayoutCount = 1,
-      .pSetLayouts = &app->descriptor_set_layout,
-      .pushConstantRangeCount = 0};
-  VKTRY(vkCreatePipelineLayout(app->device, &pipeline_layout_info, NULL,
-                               &app->pipeline_layout),
-        "Vulkan error: Failed to create pipeline layout");
+  if (app->pipeline_layout == VK_NULL_HANDLE) {
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &app->descriptor_set_layout,
+        .pushConstantRangeCount = 0};
+    VKTRY(vkCreatePipelineLayout(app->device, &pipeline_layout_info, NULL,
+                                 &app->pipeline_layout),
+          "Vulkan error: Failed to create pipeline layout");
+  }
   VkFormat depth_format;
   if (!find_depth_format(app, &depth_format)) {
     fprintf(stderr,
@@ -926,6 +932,11 @@ bool rd_create_pipeline(Application *app) {
       .layout = app->pipeline_layout,
       .renderPass = NULL,
       .pNext = &pipeline_rendering_info};
+
+  if (app->pipeline != VK_NULL_HANDLE) {
+    vkDeviceWaitIdle(app->device);
+    vkDestroyPipeline(app->device, app->pipeline, NULL);
+  }
 
   VKTRY(vkCreateGraphicsPipelines(app->device, VK_NULL_HANDLE, 1,
                                   &pipeline_info, NULL, &app->pipeline),

@@ -19,12 +19,12 @@ struct VIn {
     [[vk::location(5)]]
     float2 uvMax;
     [[vk::location(6)]]
-    float3 color;
+    float4 color;
 }
 
 struct VOut {
     float4 position : SV_Position;
-    float3 color;
+    float4 color;
     float2 uv;
 };
 
