@@ -72,7 +72,7 @@ static void char_callback(GLFWwindow *window, u32 codepoint) {
   Platform *plat = glfwGetWindowUserPointer(window);
   assert(plat != NULL);
 
-  printf("[PLAT] char callback: (codepoint='%u')\n", codepoint);
+  // printf("[PLAT] char callback: (codepoint='%u')\n", codepoint);
 
   if (plat->char_callback != NULL) {
     plat->char_callback(codepoint, plat->user_data);
@@ -84,8 +84,9 @@ static void key_callback(GLFWwindow *window, i32 key, i32 scancode, i32 action,
   Platform *plat = glfwGetWindowUserPointer(window);
   assert(plat != NULL);
 
-  printf("[PLAT] key callback: (key='%i', scancode=%i, action=%i, mods=%i)\n",
-         key, scancode, action, mods);
+  // printf("[PLAT] key callback: (key='%i', scancode=%i, action=%i,
+  // mods=%i)\n",
+  //        key, scancode, action, mods);
 
   if (plat->key_callback != NULL) {
     plat->key_callback(key, scancode, action, mods, plat->user_data);

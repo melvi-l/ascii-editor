@@ -149,57 +149,100 @@ int compute_text_size(Application *app, Str str, f32 *width, f32 *height,
 }
 
 // TODO leverage tree like datastructrue
-int compute_cursor(Cursor *cursor, Str text, i32 d_row, i32 d_col) {
-  i32 text_advance = 0;
-  i32 row_advance = 0;
-  i32 col_advance = 0;
-  i32 d_row_sign = sign(d_row);
-
-  // row
-  while (row_advance != d_row) {
-    printf("advance %i row\n", row_advance);
-    if ((i32)cursor->text_pos + text_advance < 0 ||
-        (i32)cursor->text_pos + text_advance > (i32)text.length) {
-      break;
-    }
-    // find next row
-    while ((i32)cursor->text_pos + text_advance >= 0 ||
-           (i32)cursor->text_pos + text_advance <= (i32)text.length) {
-      if (text.data[(i32)cursor->text_pos + text_advance] == '\n') {
-        row_advance += d_row_sign;
-        break;
-      }
-      text_advance += d_row_sign;
-    }
-    text_advance += d_row_sign;
+static i32 find_line_start(Str text, i32 pos) {
+  while (pos > 0 && text.data[pos - 1] != '\n') {
+    pos--;
   }
 
-  // commit text_advance
-  cursor->text_pos = (u32)((i32)cursor->text_pos + text_advance);
-  cursor->_row = (u32)((i32)cursor->_row + row_advance);
+  return pos;
+}
+
+static i32 find_line_end(Str text, i32 start) {
+  i32 pos = start;
+
+  while (pos < (i32)text.length && text.data[pos] != '\n') {
+    pos++;
+  }
+
+  return pos;
+}
+
+int compute_cursor(Cursor *cursor, Str text, i32 d_row, i32 d_col) {
+  i32 length = (i32)text.length;
+  i32 old_pos = (i32)cursor->text_pos;
+
+  if (old_pos < 0) {
+    old_pos = 0;
+  } else if (old_pos > length) {
+    old_pos = length;
+  }
+
+  i32 current_line_start = find_line_start(text, old_pos);
+  i32 target_line_start = current_line_start;
+  i32 row_advance = 0;
+
+  while (row_advance < d_row) {
+    i32 line_end = find_line_end(text, target_line_start);
+    printf("increase line (%i on %i): end of current line %i => %i\n",
+           row_advance, d_row, (i32)cursor->_row + row_advance + 1, line_end);
+
+    if (line_end >= length) {
+      break;
+    }
+
+    target_line_start = line_end + 1;
+    printf("increase line (%i on %i): start of line %i => %i\n", row_advance,
+           d_row, (i32)cursor->_row + row_advance + 1, target_line_start);
+    row_advance++;
+  }
+
+  while (row_advance > d_row) {
+    if (target_line_start == 0) {
+      break;
+    }
+
+    target_line_start = find_line_start(text, target_line_start - 1);
+    printf("decrease line (%i on %i): start of line %i => %i\n", row_advance,
+           d_row, row_advance + 1, target_line_start);
+
+    row_advance--;
+  }
+
+  i32 current_col = cursor->_col;
+  assert(current_col == old_pos - current_line_start);
+  i32 target_col;
 
   if (row_advance != 0) {
-    d_col += (i32)cursor->desired_col;
-    cursor->_col = 0;
+    target_col = (i32)cursor->desired_col + d_col;
+  } else {
+    target_col = current_col + d_col;
   }
 
-  // try to reach the desired col
-  i32 d_col_sign = sign(d_col);
-  while ((i32)cursor->text_pos + col_advance >= 0 ||
-         (i32)cursor->text_pos + col_advance <= (i32)text.length) {
-    printf("advance %i col\n", col_advance);
-    if (text.data[(i32)cursor->text_pos + col_advance] == '\n') {
-      break;
-    }
-    if ((i32)cursor->_col + col_advance >= d_col) {
-      break;
-    }
-    col_advance += d_col_sign;
+  if (target_col < 0) {
+    target_col = 0;
   }
-  cursor->_col = (u32)((i32)cursor->_col + col_advance);
-  cursor->text_pos = (u32)((i32)cursor->text_pos + col_advance);
-  return text_advance + col_advance;
+
+  i32 target_line_end = find_line_end(text, target_line_start);
+  i32 target_line_length = target_line_end - target_line_start;
+
+  if (target_col > target_line_length) {
+    target_col = target_line_length;
+  }
+
+  i32 new_pos = target_line_start + target_col;
+  i32 new_row = (i32)cursor->_row + row_advance;
+
+  if (new_row < 0) {
+    new_row = 0;
+  }
+
+  cursor->text_pos = (u32)new_pos;
+  cursor->_row = (u32)new_row;
+  cursor->_col = (u32)target_col;
+
+  return new_pos - old_pos;
 }
+
 //
 int compute_cursor_rect(Application *app, Cursor cursor, Str text, Rect *rect) {
   // compute per line x offset
@@ -222,7 +265,7 @@ int compute_frame(Application *app) {
       .x = MARGIN_X,
       .y = MARGIN_Y,
       .w = (f32)app->w - MARGIN_X * 2,
-      .h = (f32)app->h - MARGIN_Y * 2,
+      .h = (f32)app->h - MARGIN_Y * 2 - 64,
   };
 
   app->editor_viewport = (Rect){
@@ -230,6 +273,20 @@ int compute_frame(Application *app) {
       .y = outer.y + PADDING_Y,
       .w = outer.w - PADDING_X * 2,
       .h = outer.h - PADDING_Y * 2,
+  };
+
+  Rect information_outer = (Rect){
+      .x = outer.x,
+      .y = outer.h,
+      .w = outer.w,
+      .h = 64,
+  };
+
+  Rect information_inner = (Rect){
+      .x = information_outer.x + 8,
+      .y = information_outer.y + 8,
+      .w = information_outer.w - 16,
+      .h = information_outer.h - 16,
   };
   // rect
   {
@@ -250,18 +307,11 @@ int compute_frame(Application *app) {
 
   // text
   {
-
     if (render_command_execute(
             app,
             (RenderCommand){
                 .kind = RENDER_COMMAND_TEXT,
-                .bounding_box =
-                    {
-                        .x = app->editor_viewport.x,
-                        .y = app->editor_viewport.y,
-                        .w = app->editor_viewport.w,
-                        .h = app->editor_viewport.h,
-                    },
+                .bounding_box = app->editor_viewport,
                 .text = {.str = app->editor_text,
                          .color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
             &app->quad_list) != app->editor_text.length) {
@@ -294,6 +344,27 @@ int compute_frame(Application *app) {
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
                       .bounding_box = cursor_rect,
                       .rect = {.color = {.R = 1., .G = 1., .B = 0., .A = 1.}}},
+      &app->quad_list);
+
+  // information
+  ArenaTemp temp = arena_temp_begin(app->scratch_arena);
+  Str information_str = str_format(
+      temp.arena, "col=%u; row=%u; text_advance=%u; current_char=%c;",
+      app->editor_cursor._col, app->editor_cursor._row,
+      app->editor_cursor.text_pos,
+      app->editor_text.data[app->editor_cursor.text_pos]);
+  render_command_execute(
+      app,
+      (RenderCommand){.kind = RENDER_COMMAND_RECT,
+                      .bounding_box = information_outer,
+                      .rect = {.color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
+      &app->quad_list);
+  render_command_execute(
+      app,
+      (RenderCommand){.kind = RENDER_COMMAND_TEXT,
+                      .bounding_box = information_inner,
+                      .text = {.str = information_str,
+                               .color = {.R = 0., .G = 0., .B = 0., .A = 1.}}},
       &app->quad_list);
 
   app->editor_quad_is_dirty = true;
@@ -342,9 +413,9 @@ void main_loop(Application *app, Atlas *atlas) {
     plat_poll_events();
     compute_frame(app);
     draw_frame(app);
-    f64 fps = plat_compute_fps();
+    // f64 fps = plat_compute_fps();
     if (timer_tick(&second_timer)) {
-      printf("FPS: %.1f\n", fps);
+      // printf("FPS: %.1f\n", fps);
     }
   }
 }
@@ -392,7 +463,6 @@ void on_key(i32 key, i32 scancode, i32 action, i32 mods, void *user_data) {
       compute_cursor(&app->editor_cursor, app->editor_text, 0, 1);
     }
   }
-  printf("on_key %c\n", key);
 }
 
 // @main
