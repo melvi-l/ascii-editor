@@ -619,7 +619,8 @@ bool depth_buffer_cleanup(Application *app) {
 
 // @clean up
 static void rd_cleanup(Application *app) {
-  vkDeviceWaitIdle(app->device);
+  if (app->device != VK_NULL_HANDLE)
+    vkDeviceWaitIdle(app->device);
 
   if (app->image_available_semas != NULL) {
     for (u32 i = 0; i < app->inflight_count; i++) {
@@ -642,8 +643,10 @@ static void rd_cleanup(Application *app) {
   if (app->geometry_memory != VK_NULL_HANDLE)
     vkFreeMemory(app->device, app->geometry_memory, NULL);
 
-  if (app->instance_mapped_array != VK_NULL_HANDLE)
-    vkUnmapMemory(app->device, app->instance_mapped_array);
+  if (app->instance_mapped_array != NULL) {
+    vkUnmapMemory(app->device, app->instance_memory);
+    app->instance_mapped_array = NULL;
+  }
   if (app->instance_buffer != VK_NULL_HANDLE)
     vkDestroyBuffer(app->device, app->instance_buffer, NULL);
   if (app->instance_memory != VK_NULL_HANDLE)
@@ -658,13 +661,15 @@ static void rd_cleanup(Application *app) {
   if (app->texture_sampler != VK_NULL_HANDLE)
     vkDestroySampler(app->device, app->texture_sampler, NULL);
 
-  if (app->uniform_mapped_arrays != NULL)
+  if (app->uniform_mapped_arrays != NULL) {
     for (u32 i = 0; i < app->inflight_count; i++)
-      vkUnmapMemory(app->device, app->uniform_mapped_arrays[i]);
+      vkUnmapMemory(app->device, app->uniform_memories[i]);
+    app->uniform_mapped_arrays = NULL;
+  }
   if (app->uniform_buffers != NULL)
     for (u32 i = 0; i < app->inflight_count; i++)
       vkDestroyBuffer(app->device, app->uniform_buffers[i], NULL);
-  if (app->uniform_memories != VK_NULL_HANDLE)
+  if (app->uniform_memories != NULL)
     for (u32 i = 0; i < app->inflight_count; i++)
       vkFreeMemory(app->device, app->uniform_memories[i], NULL);
 
@@ -680,9 +685,9 @@ static void rd_cleanup(Application *app) {
   if (app->transfer_command_pool != VK_NULL_HANDLE)
     vkDestroyCommandPool(app->device, app->transfer_command_pool, NULL);
 
-  if (app->pipeline_layout != NULL)
+  if (app->pipeline_layout != VK_NULL_HANDLE)
     vkDestroyPipelineLayout(app->device, app->pipeline_layout, NULL);
-  if (app->pipeline != NULL)
+  if (app->pipeline != VK_NULL_HANDLE)
     vkDestroyPipeline(app->device, app->pipeline, NULL);
 
   if (app->descriptor_sets != NULL)

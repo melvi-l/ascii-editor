@@ -10,10 +10,12 @@ void lib_load(Application *app) {
 }
 
 void lib_unload(Application *app) {
-  // mark quads dirty so next load recomputes from scratch
+  if (app->pipeline != VK_NULL_HANDLE) {
+    vkDeviceWaitIdle(app->device);
+    vkDestroyPipeline(app->device, app->pipeline, NULL);
+    app->pipeline = VK_NULL_HANDLE;
+  }
   app->editor_quad_is_dirty = false;
-  // null out scratch arena temp state by resetting (safe: no Vulkan resources
-  // here)
   arena_reset(app->scratch_arena);
 }
 

@@ -175,5 +175,6 @@ int main(int argc, char **argv) {
 
 cleanup:
   rd_cleanup(&app);
+  plat_destroy(&app.plat);
   return EXIT_SUCCESS;
 }
