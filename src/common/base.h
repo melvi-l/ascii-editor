@@ -412,7 +412,7 @@ static inline u64 write_ring(u8 *ring, u64 ring_position, u64 ring_size,
     return &node->value;                                                       \
   }
 
-f64 now_seconds();
+f64 now_milliseconds();
 
 #ifdef BASE_IMPLEMENTATION
 
@@ -584,11 +584,11 @@ void str_builder_hexdump_at(Str *str, u64 pos) {
   }
 }
 
-f64 now_seconds() {
+f64 now_milliseconds() {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
 
-  return (f64)ts.tv_sec + (f64)ts.tv_nsec / 1000000000.0;
+  return (f64)ts.tv_sec * 1000.0 + (f64)ts.tv_nsec / 1000000.0;
 }
 
 // @file
@@ -637,20 +637,20 @@ bool read_file(Arena *arena, Str path, Str *out) {
 
 // @timer
 typedef struct {
-  f64 last;
-  f64 interval;
+  f64 last_ms;
+  f64 interval_ms;
 } Timer;
 
 bool timer_tick(Timer *timer) {
-  f64 now = now_seconds();
+  f64 now_ms = now_milliseconds();
 
-  if (timer->last == 0.0) {
-    timer->last = now;
+  if (timer->last_ms == 0.0) {
+    timer->last_ms = now_ms;
     return false;
   }
 
-  if (now - timer->last >= timer->interval) {
-    timer->last = now;
+  if (now_ms - timer->last_ms >= timer->interval_ms) {
+    timer->last_ms = now_ms;
     return true;
   }
 

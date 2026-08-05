@@ -165,9 +165,20 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
+  f64 _fps = 0;
+  Timer fps_timer = {.interval_ms = 500};
+  Timer reasonnable_timer = {.interval_ms = 5000};
   while (!plat_should_close(&app.plat)) {
     plat_poll_events();
-    reload_poll(&g_reload);
+
+    _fps = plat_compute_fps();
+    if (timer_tick(&fps_timer)) {
+      app.fps = _fps;
+    }
+
+    if (timer_tick(&reasonnable_timer)) {
+      reload_poll(&g_reload);
+    }
     g_reload.api.update(&app);
   }
 

@@ -19,10 +19,7 @@ void lib_unload(Application *app) {
   arena_reset(app->scratch_arena);
 }
 
-void lib_update(Application *app) {
-  compute_frame(app);
-  draw_frame(app);
-}
+void lib_update(Application *app) { update(app); }
 
 LibAPI lib_get_api(void) {
   return (LibAPI){

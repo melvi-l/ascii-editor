@@ -103,22 +103,22 @@ void plat_set_key_callback(Platform *plat, PlatKeyCallback callback) {
 }
 
 f64 plat_compute_fps() {
-  static f64 start_time = 0.0;
+  static f64 start_time_ms = 0.0;
   static int frame_count = 0;
 
-  f64 current_time = now_seconds();
+  f64 current_time_ms = now_milliseconds();
 
-  if (start_time == 0.0) {
-    start_time = current_time;
+  if (start_time_ms == 0.0) {
+    start_time_ms = current_time_ms;
   }
 
   frame_count++;
 
-  f64 elapsed = current_time - start_time;
+  f64 elapsed = current_time_ms - start_time_ms;
 
-  f64 fps = (f64)frame_count / elapsed;
+  f64 fps = ((f64)frame_count / elapsed) * 1000.;
   frame_count = 0;
-  start_time = current_time;
+  start_time_ms = current_time_ms;
 
   return fps;
 }

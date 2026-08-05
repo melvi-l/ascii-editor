@@ -272,7 +272,7 @@ int compute_frame(Application *app) {
 
   Rect information_viewport = {
       .x = outer.x,
-      .y = outer.y + outer.h - 64,
+      .y = outer.y + outer.h,
       .w = outer.w,
       .h = 64,
   };
@@ -301,7 +301,7 @@ int compute_frame(Application *app) {
                 .kind = RENDER_COMMAND_TEXT,
                 .bounding_box = app->editor_viewport,
                 .text = {.str = app->editor_text,
-                         .color = {.R = 1., .G = 0., .B = 0., .A = .8f}}},
+                         .color = {.R = 1., .G = 1., .B = 1., .A = .8f}}},
             &app->quad_list) != app->editor_text.length) {
       fprintf(stderr, "Unable to draw editor text.\n");
     };
@@ -313,14 +313,8 @@ int compute_frame(Application *app) {
         app,
         (RenderCommand){
             .kind = RENDER_COMMAND_RECT,
-            .bounding_box =
-                {
-                    .x = app->editor_viewport.x,
-                    .y = app->editor_viewport.y + h,
-                    .w = w,
-                    .h = 4,
-                },
-            .rect = {.color = {.R = 0., .G = 1., .B = .0, .A = 0.}}},
+            .bounding_box = app->editor_viewport,
+            .rect = {.color = {.R = 0., .G = 1., .B = .0, .A = .1f}}},
         &app->quad_list);
   }
 
@@ -336,9 +330,10 @@ int compute_frame(Application *app) {
 
   // information
   ArenaTemp temp = arena_temp_begin(app->scratch_arena);
-  Str information_str = str_format(
-      temp.arena, "col=%u ; row=%u ;\ntext_advance=%u", app->editor_cursor._col,
-      app->editor_cursor._row, app->editor_cursor.text_pos);
+  Str information_str =
+      str_format(temp.arena, "col=%u ; row=%u ;text_advance=%u\nFPS: %f",
+                 app->editor_cursor._col, app->editor_cursor._row,
+                 app->editor_cursor.text_pos, app->fps);
   render_command_execute(
       app,
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
@@ -421,4 +416,9 @@ void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
 void on_char_input(Application *app, u32 c) {
   (void)app;
   printf("on_char %c\n", c);
+}
+
+void update(Application *app) {
+  draw_frame(app);
+  compute_frame(app);
 }

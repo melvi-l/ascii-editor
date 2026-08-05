@@ -77,6 +77,7 @@ typedef struct Application {
   u32 w, h;
 
   Platform plat;
+  f64 fps;
   Atlas atlas;
 
   Arena *vulkan_arena;
