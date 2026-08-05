@@ -33,6 +33,7 @@ static u32 render_command_execute(Application *app, RenderCommand cmd,
         .r = cmd.rect.color.R,
         .g = cmd.rect.color.G,
         .b = cmd.rect.color.B,
+        .a = cmd.rect.color.A,
     };
     return 1;
   case RENDER_COMMAND_TEXT:
@@ -86,7 +87,7 @@ static u32 render_command_execute(Application *app, RenderCommand cmd,
           .r = cmd.text.color.R,
           .g = cmd.text.color.G,
           .b = cmd.text.color.B,
-          // .a = cmd.rect.color.A,
+          .a = cmd.text.color.A,
       };
 
       px += g->xadvance;
@@ -300,7 +301,7 @@ int compute_frame(Application *app) {
                 .kind = RENDER_COMMAND_TEXT,
                 .bounding_box = app->editor_viewport,
                 .text = {.str = app->editor_text,
-                         .color = {.R = 1., .G = 1., .B = 1., .A = .8f}}},
+                         .color = {.R = 1., .G = 0., .B = 0., .A = .8f}}},
             &app->quad_list) != app->editor_text.length) {
       fprintf(stderr, "Unable to draw editor text.\n");
     };

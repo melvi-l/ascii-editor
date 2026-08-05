@@ -32,7 +32,7 @@ typedef struct {
   f32 x, y, w, h;
   f32 u_min_x, u_min_y;
   f32 u_max_x, u_max_y;
-  f32 r, g, b;
+  f32 r, g, b, a;
 } QuadInstance;
 typedef struct {
   QuadInstance *data;

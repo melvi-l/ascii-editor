@@ -42,5 +42,5 @@ VOut vertMain(VIn input) {
 float4 fragMain(VOut input) : SV_Target
 {
     float bitmap = atlas_sampler.Sample(input.uv).r;
-    return float4(input.color.rgb, bitmap);
+    return float4(input.color.rgb, bitmap * input.color.a);
 }
