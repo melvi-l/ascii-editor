@@ -11,9 +11,9 @@
 
 #include "host/platform.h"
 
-#include "lib/math.h"
+#include "HandmadeMath.h"
 
-#include "lib/font.h"
+#include "stb_truetype.h"
 
 #pragma GCC diagnostic pop
 

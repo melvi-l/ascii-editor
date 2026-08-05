@@ -81,18 +81,21 @@ static void host_resize(u32 width, u32 height, void *user_data) {
   app->w = width;
   app->h = height;
   rd_resize(app);
-  if (g_reload.handle) g_reload.api.resize(app, width, height);
+  if (g_reload.handle)
+    g_reload.api.resize(app, width, height);
 }
 
 static void host_key(i32 key, i32 scancode, i32 action, i32 mods,
                      void *user_data) {
   Application *app = user_data;
-  if (g_reload.handle) g_reload.api.key(app, key, scancode, action, mods);
+  if (g_reload.handle)
+    g_reload.api.key(app, key, scancode, action, mods);
 }
 
 static void host_char(u32 c, void *user_data) {
   Application *app = user_data;
-  if (g_reload.handle) g_reload.api.char_input(app, c);
+  if (g_reload.handle)
+    g_reload.api.char_input(app, c);
 }
 
 int main(int argc, char **argv) {
@@ -106,14 +109,14 @@ int main(int argc, char **argv) {
   printf("%*s\n", STR_FMT(filepath));
 
   Application app = {
-    .vulkan_arena  = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
-    .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
+      .vulkan_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
+      .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
   };
 
   app.quad_list = (QuadInstanceList){
-    .data     = ARENA_PUSH_ARRAY(app.vulkan_arena, max_quad_count, QuadInstance),
-    .length   = 0,
-    .capacity = max_quad_count,
+      .data = ARENA_PUSH_ARRAY(app.vulkan_arena, max_quad_count, QuadInstance),
+      .length = 0,
+      .capacity = max_quad_count,
   };
 
   if (plat_init(&app.plat, host_resize, &app) != 0) {
@@ -124,9 +127,9 @@ int main(int argc, char **argv) {
   plat_set_key_callback(&app.plat, host_key);
 
   if (init_atlas(
-        app.vulkan_arena,
-        S("/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf"),
-        &app.atlas) != 0) {
+          app.vulkan_arena,
+          S("/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf"),
+          &app.atlas) != 0) {
     return EXIT_FAILURE;
   }
 
@@ -157,8 +160,8 @@ int main(int argc, char **argv) {
   rd_create_descriptor_set(&app);
 
   g_reload = (Reload){
-    .path = "./build/libapp.so",
-    .app  = &app,
+      .path = "./build/libapp.so",
+      .app = &app,
   };
   if (!reload_open(&g_reload)) {
     fprintf(stderr, "host: failed to open lib\n");

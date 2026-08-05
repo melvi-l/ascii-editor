@@ -1,5 +1,4 @@
 #include "host/vulkan.h"
-#include "common/common.h"
 #include <vulkan/vulkan_core.h>
 
 #define vertices_count 4

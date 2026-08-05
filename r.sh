@@ -47,7 +47,7 @@ build_host() {
   local cflags; cflags=$(cflags_for_mode "$MODE")
   local t0=$SECONDS
   gcc $cflags -rdynamic "$SRC_DIR/host/main.c" -o "$BUILD_DIR/$HOST_EXEC" \
-    $COMMON_LIBS -ldl -I"$SRC_DIR"
+    $COMMON_LIBS -ldl -I"$SRC_DIR" -Iexternal
   printf '[host]    built %s (%s, %ds)\n' "$HOST_EXEC" "$MODE" "$((SECONDS - t0))"
 }
 
@@ -55,7 +55,7 @@ build_lib() {
   local cflags; cflags=$(cflags_for_mode "$MODE")
   local t0=$SECONDS
   gcc $cflags -shared -fPIC "$SRC_DIR/lib/main.c" -o "$BUILD_DIR/$LIB_NAME" \
-    $COMMON_LIBS -I"$SRC_DIR"
+    $COMMON_LIBS -I"$SRC_DIR" -Iexternal
   printf '[lib]     built %s (%s, %ds)\n' "$LIB_NAME" "$MODE" "$((SECONDS - t0))"
 }
 
