@@ -233,6 +233,25 @@ static float layout_get_advance(const Layout layout, const char c) {
   return layout.glyph_advance;
 }
 
+static LayoutRow *layout_find_row(const Layout *layout, u32 offset,
+                                  u32 *out_index) {
+  assert(layout != NULL || layout->rows != NULL);
+
+  for (u32 i = 0; i < layout->row_count; ++i) {
+    LayoutRow *row = &layout->rows[i];
+
+    if (offset >= row->offset_start && offset <= row->offset_end) {
+      if (out_index != NULL) {
+        *out_index = i;
+      }
+
+      return row;
+    }
+  }
+
+  return NULL;
+}
+
 void layout_update(Layout *layout, const Document doc, bool wrap_enabled) {
   layout->rows = NULL;
   layout->row_count = 0;
@@ -379,16 +398,51 @@ void cursor_move_right(Cursor *cursor, const Document doc) {
   cursor->offset = doc_next_offset(doc, cursor->offset);
   cursor->prefered_col_valid = false;
 }
-// void editor_move_vertical(Editor *editor, i32 direction) {
-// need layout
-// }
+void cursor_move_down(Cursor *cursor, const Layout layout) {
+  u32 row_index = 0;
+  LayoutRow *current_row = layout_find_row(&layout, cursor->offset, &row_index);
+  if (row_index >= layout.row_count - 1) {
+    cursor->offset = current_row->offset_end;
+    return;
+  }
+  u32 relative_offset;
+  if (cursor->prefered_col_valid) {
+    relative_offset = cursor->prefered_col;
+  } else {
+    relative_offset = cursor->offset - current_row->offset_start;
+    cursor->prefered_col = relative_offset;
+    cursor->prefered_col_valid = true;
+  }
+
+  LayoutRow *next_row = &layout.rows[row_index + 1];
+  cursor->offset =
+      min(next_row->offset_start + relative_offset, next_row->offset_end);
+}
+void cursor_move_up(Cursor *cursor, const Layout layout) {
+  u32 row_index = 0;
+  LayoutRow *current_row = layout_find_row(&layout, cursor->offset, &row_index);
+  if (row_index == 0) {
+    cursor->offset = current_row->offset_start;
+    return;
+  }
+  u32 relative_offset;
+  if (cursor->prefered_col_valid) {
+    relative_offset = cursor->prefered_col;
+  } else {
+    relative_offset = cursor->offset - current_row->offset_start;
+    cursor->prefered_col = relative_offset;
+    cursor->prefered_col_valid = true;
+  }
+
+  LayoutRow *previous = &layout.rows[row_index - 1];
+  cursor->offset =
+      min(previous->offset_start + relative_offset, previous->offset_end);
+}
 static struct {
   Rect rect;
   LayoutRow *row;
   char c;
 } debug_cursor = {0};
-#define editor_move_up(editor) editor_move_vertical((editor), -1)
-#define editor_move_down(editor) editor_move_vertical((editor), 1)
 
 #define cursor_render(editor, atlas, color, list)                              \
   cursor_quad_list(&(editor).cursor, (editor).layout, (editor).doc,            \
@@ -396,14 +450,7 @@ static struct {
 void cursor_quad_list(Cursor *cursor, const Layout layout, const Document doc,
                       const Viewport vp, const Atlas a, const Vec4 color,
                       QuadInstanceList *list) {
-  LayoutRow *row;
-  for (u32 i = 0; i < layout.row_count; i++) {
-    row = &layout.rows[i];
-    if (cursor->offset >= row->offset_start &&
-        cursor->offset <= row->offset_end) {
-      break;
-    }
-  }
+  LayoutRow *row = layout_find_row(&layout, cursor->offset, NULL);
   assert(cursor->offset >= row->offset_start &&
          cursor->offset <= row->offset_end);
   f32 x = 0;
@@ -511,12 +558,18 @@ int compute_frame(Application *app) {
   //     &app->quad_list);
 
   // @information
+  Cursor *cursor = &app->editor.cursor;
   ArenaTemp temp = arena_temp_begin(app->scratch_arena);
+  Str prefered_col_str =
+      (cursor->prefered_col_valid)
+          ? str_format(temp.arena, "pref_col=%u; ", cursor->prefered_col)
+          : S("");
   Str information_str = str_format(
-      temp.arena, "x=%f; y=%f; offset=%u        row=%u-%u; char=%c\nFPS: %f",
-      debug_cursor.rect.x, debug_cursor.rect.y, app->editor.cursor.offset,
-      debug_cursor.row->offset_start, debug_cursor.row->offset_end,
-      debug_cursor.c, app->fps);
+      temp.arena,
+      "x=%.0f; y=%.0f; offset=%u;%.*s --- row=%u-%u; char=%u\nFPS: %f",
+      debug_cursor.rect.x, debug_cursor.rect.y, cursor->offset,
+      STR_FMT(prefered_col_str), debug_cursor.row->offset_start,
+      debug_cursor.row->offset_end, debug_cursor.c, app->fps);
   render_command_execute(
       app,
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
@@ -585,29 +638,18 @@ void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
     if (key == GLFW_KEY_UP) {
       // compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
+      cursor_move_up(&editor->cursor, editor->layout);
     }
     if (key == GLFW_KEY_DOWN) {
       // compute_cursor(&app->editor_cursor, app->editor_text, 1, 0);
+      cursor_move_down(&editor->cursor, editor->layout);
     }
 
     if (key == GLFW_KEY_LEFT) {
       cursor_move_left(&editor->cursor, editor->doc);
-      // i32 d_col = 1;
-      // if (mods == GLFW_MOD_CONTROL) {
-      //   d_col = find_space_next(app->editor_text,
-      //   app->editor_cursor.text_pos) -
-      //           app->editor_cursor.text_pos;
-      // }
-      // compute_cursor(&app->editor_cursor, app->editor_text, 0, -1);
     }
     if (key == GLFW_KEY_RIGHT) {
       cursor_move_right(&editor->cursor, editor->doc);
-      // if (mods == GLFW_MOD_CONTROL) {
-      //   d_col = find_space_next(app->editor_text,
-      //   app->editor_cursor.text_pos) -
-      //           app->editor_cursor.text_pos;
-      // }
-      // compute_cursor(&app->editor_cursor, app->editor_text, 0, 1);
     }
   }
 }
