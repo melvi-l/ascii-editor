@@ -199,35 +199,18 @@ static char doc_get_char(const Document doc, u32 offset) {
   assert(offset < doc_get_length(doc));
   return (char)doc.table.data[offset];
 }
-// static u32 doc_previous_offset(const Document doc, u32 offset) {
-//   (void)doc;
-//   if (offset > 0)
-//     return offset - 1;
-//   return 0;
-// }
-// static u32 doc_next_offset(const Document doc, u32 offset) {
-//   u32 len = doc_get_length(doc);
-//   if (offset < len)
-//     return offset + 1;
-//   return len;
-// }
-
-//
-// @editor-cursor-move
-// void editor_move_left(Editor *editor) {
-//   editor->cursor.offset =
-//       doc_previous_offset(editor->doc, editor->cursor.offset);
-//   editor->cursor.prefered_col_valid = false;
-// }
-// void editor_move_right(Editor *editor) {
-//   editor->cursor.offset = doc_next_offset(editor->doc,
-//   editor->cursor.offset); editor->cursor.prefered_col_valid = false;
-// }
-// void editor_move_vertical(Editor *editor, i32 direction) {
-//   // need layout
-// }
-// #define editor_move_up(editor) editor_move_vertical((editor), -1)
-// #define editor_move_down(editor) editor_move_vertical((editor), 1)
+static u32 doc_previous_offset(const Document doc, u32 offset) {
+  (void)doc;
+  if (offset > 0)
+    return offset - 1;
+  return 0;
+}
+static u32 doc_next_offset(const Document doc, u32 offset) {
+  u32 len = doc_get_length(doc);
+  if (offset < len)
+    return offset + 1;
+  return len;
+}
 
 //
 // @layout
@@ -335,10 +318,12 @@ void layout_quad_list(const Layout layout, const Document doc,
                       QuadInstanceList *list) {
   u32 line_start = 0, line_end = 0;
   layout_get_visible_line(layout, vp, &line_start, &line_end);
-  f32 px = vp.x;
-  f32 py = vp.y + layout.line_height;
   for (u32 i = line_start; i < line_end; i++) {
     LayoutRow *row = &layout.rows[i];
+
+    f32 px = vp.x - vp.scroll_x;
+    f32 row_top = vp.y + row->y - vp.scroll_y;
+    f32 baseline_y = row_top + a.ascent;
     for (u32 offset = row->offset_start; offset < row->offset_end; offset++) {
       char c = doc_get_char(doc, offset);
       assert(c != '\n');
@@ -352,7 +337,7 @@ void layout_quad_list(const Layout layout, const Document doc,
 
       stbtt_bakedchar *g = atlas_get_glyph((Atlas *)&a, c);
       f32 glyph_x = roundf(px + g->xoff);
-      f32 glyph_y = roundf(py + g->yoff);
+      f32 glyph_y = roundf(baseline_y + g->yoff);
       // y culling should be already down -> visible line
       if (glyph_x + advance < vp.x + vp.scroll_x ||
           glyph_x > vp.x + vp.scroll_x + vp.w) {
@@ -381,9 +366,73 @@ void layout_quad_list(const Layout layout, const Document doc,
       px += advance;
     }
     // printf("\n");
-    px = vp.x;
-    py += layout.line_height;
   }
+}
+
+//
+// @cursor
+void cursor_move_left(Cursor *cursor, const Document doc) {
+  cursor->offset = doc_previous_offset(doc, cursor->offset);
+  cursor->prefered_col_valid = false;
+}
+void cursor_move_right(Cursor *cursor, const Document doc) {
+  cursor->offset = doc_next_offset(doc, cursor->offset);
+  cursor->prefered_col_valid = false;
+}
+// void editor_move_vertical(Editor *editor, i32 direction) {
+// need layout
+// }
+static struct {
+  Rect rect;
+  LayoutRow *row;
+  char c;
+} debug_cursor = {0};
+#define editor_move_up(editor) editor_move_vertical((editor), -1)
+#define editor_move_down(editor) editor_move_vertical((editor), 1)
+
+#define cursor_render(editor, atlas, color, list)                              \
+  cursor_quad_list(&(editor).cursor, (editor).layout, (editor).doc,            \
+                   (editor).vp, (atlas), (color), (list))
+void cursor_quad_list(Cursor *cursor, const Layout layout, const Document doc,
+                      const Viewport vp, const Atlas a, const Vec4 color,
+                      QuadInstanceList *list) {
+  LayoutRow *row;
+  for (u32 i = 0; i < layout.row_count; i++) {
+    row = &layout.rows[i];
+    if (cursor->offset >= row->offset_start &&
+        cursor->offset <= row->offset_end) {
+      break;
+    }
+  }
+  assert(cursor->offset >= row->offset_start &&
+         cursor->offset <= row->offset_end);
+  f32 x = 0;
+  for (u32 i = row->offset_start; i < cursor->offset; i++) {
+    char c = doc_get_char(doc, i);
+    x += layout_get_advance(layout, c);
+  }
+
+  Rect cursor_rect = {.x = vp.x + x - vp.scroll_x,
+                      .y = vp.y + row->y - vp.scroll_y,
+                      .w = 2,
+                      .h = a.ascent - a.descent};
+  list->data[list->length++] = (QuadInstance){
+      .x = cursor_rect.x,
+      .y = cursor_rect.y,
+      .w = cursor_rect.w,
+      .h = cursor_rect.h,
+      .u_min_x = a.white_x,
+      .u_min_y = a.white_y,
+      .u_max_x = a.white_x,
+      .u_max_y = a.white_y,
+      .r = color.R,
+      .g = color.G,
+      .b = color.B,
+      .a = color.A,
+  };
+  debug_cursor.rect = cursor_rect;
+  debug_cursor.row = row;
+  debug_cursor.c = doc_get_char(doc, cursor->offset);
 }
 
 int compute_frame(Application *app) {
@@ -403,12 +452,18 @@ int compute_frame(Application *app) {
       .h = outer.h - PADDING_Y * 2,
   };
 
-  // Rect information_viewport = {
-  //     .x = outer.x,
-  //     .y = outer.y + outer.h,
-  //     .w = outer.w,
-  //     .h = 64,
-  // };
+  Rect information_outer = {
+      .x = outer.x,
+      .y = outer.y + outer.h,
+      .w = outer.w,
+      .h = 64,
+  };
+  Rect information_inner = {
+      .x = information_outer.x + 8,
+      .y = information_outer.y + 8,
+      .w = information_outer.w - 16,
+      .h = information_outer.h - 16,
+  };
   // rect
   {
     render_command_execute(
@@ -434,10 +489,14 @@ int compute_frame(Application *app) {
         .w = editor_viewport.w,
         .h = editor_viewport.h,
     };
+    app->editor.color = (Vec4){.R = 1., .G = 1., .B = 1., .A = 0.1f};
     app->editor.layout.wrap_width = editor_viewport.w;
     layout_update(&app->editor.layout, app->editor.doc,
                   app->editor.wrap_enabled);
     layout_render(app->editor, app->atlas, &app->quad_list);
+    Vec4 cursor_color = {.R = 1., .G = 1., .B = 1., .A = 1.f};
+    app->editor.cursor.affinity = CARET_AFFINITY_DOWNSTREAM;
+    cursor_render(app->editor, app->atlas, cursor_color, &app->quad_list);
   }
 
   // cursor
@@ -451,27 +510,27 @@ int compute_frame(Application *app) {
   //                     = 1.}}},
   //     &app->quad_list);
 
-  // // information
-  // ArenaTemp temp = arena_temp_begin(app->scratch_arena);
-  // Str information_str =
-  //     str_format(temp.arena, "col=%u ; row=%u ;text_advance=%u\nFPS: %f",
-  //                app->editor_cursor._col, app->editor_cursor._row,
-  //                app->editor_cursor.text_pos, app->fps);
-  // render_command_execute(
-  //     app,
-  //     (RenderCommand){.kind = RENDER_COMMAND_RECT,
-  //                     .bounding_box = information_viewport,
-  //                     .rect = {.color = {.R = 1., .G = 0., .B = 0., .A
-  //                     = 1.}}},
-  //     &app->quad_list);
-  // render_command_execute(
-  //     app,
-  //     (RenderCommand){.kind = RENDER_COMMAND_TEXT,
-  //                     .bounding_box = information_viewport,
-  //                     .text = {.str = information_str,
-  //                              .color = {.R = 1., .G = 1., .B = 1., .A
-  //                              = 1.}}},
-  //     &app->quad_list);
+  // @information
+  ArenaTemp temp = arena_temp_begin(app->scratch_arena);
+  Str information_str = str_format(
+      temp.arena, "x=%f; y=%f; offset=%u        row=%u-%u; char=%c\nFPS: %f",
+      debug_cursor.rect.x, debug_cursor.rect.y, app->editor.cursor.offset,
+      debug_cursor.row->offset_start, debug_cursor.row->offset_end,
+      debug_cursor.c, app->fps);
+  render_command_execute(
+      app,
+      (RenderCommand){.kind = RENDER_COMMAND_RECT,
+                      .bounding_box = information_outer,
+                      .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 1.}}},
+      &app->quad_list);
+  render_command_execute(
+      app,
+      (RenderCommand){.kind = RENDER_COMMAND_TEXT,
+                      .bounding_box = information_inner,
+                      .text = {.str = information_str,
+                               .color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
+      &app->quad_list);
+  arena_temp_end(temp);
 
   app->editor_quad_is_dirty = true;
   return 0;
@@ -519,10 +578,10 @@ void on_resize(Application *app, u32 w, u32 h) {
 }
 
 void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
-  (void)app;
   (void)scancode;
   if (mods == GLFW_MOD_CONTROL) {
   }
+  Editor *editor = &app->editor;
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
     if (key == GLFW_KEY_UP) {
       // compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
@@ -532,6 +591,7 @@ void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
     }
 
     if (key == GLFW_KEY_LEFT) {
+      cursor_move_left(&editor->cursor, editor->doc);
       // i32 d_col = 1;
       // if (mods == GLFW_MOD_CONTROL) {
       //   d_col = find_space_next(app->editor_text,
@@ -541,6 +601,7 @@ void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
       // compute_cursor(&app->editor_cursor, app->editor_text, 0, -1);
     }
     if (key == GLFW_KEY_RIGHT) {
+      cursor_move_right(&editor->cursor, editor->doc);
       // if (mods == GLFW_MOD_CONTROL) {
       //   d_col = find_space_next(app->editor_text,
       //   app->editor_cursor.text_pos) -

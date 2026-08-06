@@ -22,7 +22,7 @@ static LibAPI g_api;
 
 // @font-atlas
 static int init_atlas(Arena *arena, Str font_path, Atlas *a) {
-  *a = (Atlas){.w = 512, .h = 512, .font_size = 16};
+  *a = (Atlas){.w = 512, .h = 512, .font_size = 24};
   a->data = ARENA_PUSH_ARRAY(arena, a->w * a->h, u8);
 
   Str ttf_file;
@@ -127,7 +127,7 @@ static void host_char(u32 c, void *user_data) {
 int main(int argc, char **argv) {
   Str filepath;
   if (argc < 2) {
-    filepath = S("lorem.txt");
+    filepath = S("src/host/main.c");
   } else {
     filepath = S_line(argv[1]);
   }
@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
 
   f64 _fps = 0;
   Timer fps_timer = {.interval_ms = 500};
-  Timer reasonnable_timer = {.interval_ms = 5000};
+  Timer reasonnable_timer = {.interval_ms = 100};
   while (!plat_should_close(&app.plat)) {
     plat_poll_events();
 

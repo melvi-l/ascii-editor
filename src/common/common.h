@@ -45,8 +45,8 @@ typedef struct {
 } Rect;
 
 typedef enum CaretAffinity {
+  CARET_AFFINITY_DOWNSTREAM,
   CARET_AFFINITY_UPSTREAM,
-  CARET_AFFINITY_DOWNSTREAM
 } CaretAffinity;
 typedef struct Cursor {
   u32 offset;
