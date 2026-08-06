@@ -10,11 +10,16 @@
 #define PADDING_X PADDING
 #define PADDING_Y PADDING
 
-// mirror of rd.c quad indices (same TU-independent macro)
 #define indices_count 6
 
-static u32 render_command_execute(Application *app, RenderCommand cmd,
-                                  QuadInstanceList *list) {
+// @atlas
+static stbtt_bakedchar *atlas_get_glyph(Atlas *a, const char c) {
+  return &a->glyphs[c - FIRST_CHAR];
+}
+
+// @render-command
+u32 render_command_execute(Application *app, RenderCommand cmd,
+                           QuadInstanceList *list) {
   switch (cmd.kind) {
   case RENDER_COMMAND_RECT:
     if (list->capacity - list->length <= 0) {
@@ -41,7 +46,7 @@ static u32 render_command_execute(Application *app, RenderCommand cmd,
     f32 px = cmd.bounding_box.x;
     f32 py = cmd.bounding_box.y + (f32)app->atlas.ascent;
     for (u32 i = 0; i < cmd.text.str.length; i++) {
-      u8 c = cmd.text.str.data[i];
+      char c = (char)cmd.text.str.data[i];
 
       if (c == '\n') {
         px = cmd.bounding_box.x;
@@ -49,10 +54,10 @@ static u32 render_command_execute(Application *app, RenderCommand cmd,
         continue;
       }
 
-      if (c < FIRST_CHAR || c >= FIRST_CHAR + CHAR_COUNT)
+      if (c < FIRST_CHAR)
         continue;
 
-      stbtt_bakedchar *g = &atlas->glyphs[c - FIRST_CHAR];
+      stbtt_bakedchar *g = atlas_get_glyph(atlas, c);
 
       if (c == ' ') {
         px += g->xadvance;
@@ -63,8 +68,8 @@ static u32 render_command_execute(Application *app, RenderCommand cmd,
           px > cmd.bounding_box.x + cmd.bounding_box.w ||
           py < cmd.bounding_box.y ||
           py > cmd.bounding_box.y + cmd.bounding_box.h) {
-        px = cmd.bounding_box.x;
-        py += atlas->line_height;
+        // px = cmd.bounding_box.x;
+        // py += atlas->line_height;
         continue;
       }
 
@@ -104,7 +109,26 @@ static u32 render_command_execute(Application *app, RenderCommand cmd,
   }
 }
 
-// TODO: add wrapping flag
+//
+// @text
+// static i32 find_previous_char(Str text, i32 pos, char c) {
+//   while (pos >= 0 && text.data[pos] != c) {
+//     pos--;
+//   }
+//
+//   return pos;
+// }
+// static i32 find_next_char(Str text, i32 pos, char c) {
+//   while (pos < (i32)text.length && text.data[pos] != c) {
+//     pos++;
+//   }
+//
+//   return pos;
+// }
+#define find_line_start(str, pos) (find_previous_char((str), (pos), '\n') - 1)
+#define find_line_end(str, pos) (find_next_char((str), (pos), '\n'))
+
+// TODO(melvil): need upgrade
 int compute_text_size(Application *app, Str str, f32 *width, f32 *height,
                       Rect bounding_box) {
 
@@ -146,111 +170,220 @@ int compute_text_size(Application *app, Str str, f32 *width, f32 *height,
   return 0;
 }
 
-// TODO leverage tree like datastructrue
-static i32 find_line_start(Str text, i32 pos) {
-  while (pos > 0 && text.data[pos - 1] != '\n') {
-    pos--;
+//
+// @document
+typedef enum CharacterClass {
+  CHARACTER_SPACE,
+  CHARACTER_LINE_END,
+  CHARACTER_WORD,
+  CHARACTER_PUNCTUATION
+} CharacterClass;
+CharacterClass character_class(unsigned char byte) {
+  if (byte == ' ') {
+    return CHARACTER_SPACE;
   }
 
-  return pos;
+  if (byte == '\n') {
+    return CHARACTER_LINE_END;
+  }
+
+  if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+      (byte >= '0' && byte <= '9') || byte == '_') {
+    return CHARACTER_WORD;
+  }
+
+  return CHARACTER_PUNCTUATION;
 }
-
-static i32 find_line_end(Str text, i32 start) {
-  i32 pos = start;
-
-  while (pos < (i32)text.length && text.data[pos] != '\n') {
-    pos++;
-  }
-
-  return pos;
+static u32 doc_get_length(const Document doc) { return (u32)doc.table.length; }
+static char doc_get_char(const Document doc, u32 offset) {
+  assert(offset < doc_get_length(doc));
+  return (char)doc.table.data[offset];
 }
-
-int compute_cursor(Cursor *cursor, Str text, i32 d_row, i32 d_col) {
-  i32 length = (i32)text.length;
-  i32 old_pos = (i32)cursor->text_pos;
-
-  if (old_pos < 0) {
-    old_pos = 0;
-  } else if (old_pos > length) {
-    old_pos = length;
-  }
-
-  i32 current_line_start = find_line_start(text, old_pos);
-  i32 target_line_start = current_line_start;
-  i32 row_advance = 0;
-
-  while (row_advance < d_row) {
-    i32 line_end = find_line_end(text, target_line_start);
-    printf("increase line (%i on %i): end of current line %i => %i\n",
-           row_advance, d_row, (i32)cursor->_row + row_advance + 1, line_end);
-
-    if (line_end >= length) {
-      break;
-    }
-
-    target_line_start = line_end + 1;
-    printf("increase line (%i on %i): start of line %i => %i\n", row_advance,
-           d_row, (i32)cursor->_row + row_advance + 1, target_line_start);
-    row_advance++;
-  }
-
-  while (row_advance > d_row) {
-    if (target_line_start == 0) {
-      break;
-    }
-
-    target_line_start = find_line_start(text, target_line_start - 1);
-    printf("decrease line (%i on %i): start of line %i => %i\n", row_advance,
-           d_row, row_advance + 1, target_line_start);
-
-    row_advance--;
-  }
-
-  i32 current_col = old_pos - current_line_start;
-  i32 target_col;
-
-  if (row_advance != 0) {
-    target_col = (i32)cursor->desired_col + d_col;
-  } else {
-    target_col = current_col + d_col;
-  }
-
-  if (target_col < 0) {
-    target_col = 0;
-  }
-
-  i32 target_line_end = find_line_end(text, target_line_start);
-  i32 target_line_length = target_line_end - target_line_start;
-
-  if (target_col > target_line_length) {
-    target_col = target_line_length;
-  }
-
-  i32 new_pos = target_line_start + target_col;
-  i32 new_row = (i32)cursor->_row + row_advance;
-
-  if (new_row < 0) {
-    new_row = 0;
-  }
-
-  cursor->text_pos = (u32)new_pos;
-  cursor->_row = (u32)new_row;
-  cursor->_col = (u32)target_col;
-
-  return new_pos - old_pos;
-}
+// static u32 doc_previous_offset(const Document doc, u32 offset) {
+//   (void)doc;
+//   if (offset > 0)
+//     return offset - 1;
+//   return 0;
+// }
+// static u32 doc_next_offset(const Document doc, u32 offset) {
+//   u32 len = doc_get_length(doc);
+//   if (offset < len)
+//     return offset + 1;
+//   return len;
+// }
 
 //
-int compute_cursor_rect(Application *app, Cursor cursor, Str text, Rect *rect) {
-  // compute per line x offset
-  (void)&text;
-  *rect = (Rect){
-      .x = app->editor_viewport.x + app->atlas.advance * (f32)cursor._col,
-      .y = app->editor_viewport.y + app->atlas.line_height * (f32)cursor._row,
-      .w = 2,
-      .h = app->atlas.line_height};
+// @editor-cursor-move
+// void editor_move_left(Editor *editor) {
+//   editor->cursor.offset =
+//       doc_previous_offset(editor->doc, editor->cursor.offset);
+//   editor->cursor.prefered_col_valid = false;
+// }
+// void editor_move_right(Editor *editor) {
+//   editor->cursor.offset = doc_next_offset(editor->doc,
+//   editor->cursor.offset); editor->cursor.prefered_col_valid = false;
+// }
+// void editor_move_vertical(Editor *editor, i32 direction) {
+//   // need layout
+// }
+// #define editor_move_up(editor) editor_move_vertical((editor), -1)
+// #define editor_move_down(editor) editor_move_vertical((editor), 1)
 
-  return 0;
+//
+// @layout
+// static bool layout_is_valid(const Layout layout, const Document doc) {
+//   return layout.document_revision == doc.revision;
+// }
+
+#define LAYOUT_ROW_TOLERANCE 10
+static u32 layout_estimate_row_count(const Layout layout, const Document doc,
+                                     bool wrap_enabled) {
+  assert(wrap_enabled);
+  return (u32)((float)doc_get_length(doc) / layout.glyph_advance *
+               LAYOUT_ROW_TOLERANCE);
+}
+
+#define TAB_WIDTH 4
+static float layout_get_advance(const Layout layout, const char c) {
+  if (c == '\t')
+    return TAB_WIDTH * layout.glyph_advance;
+  return layout.glyph_advance;
+}
+
+void layout_update(Layout *layout, const Document doc, bool wrap_enabled) {
+  layout->rows = NULL;
+  layout->row_count = 0;
+  layout->row_capacity = 0;
+
+  layout->content_width = 0.0f;
+  layout->content_height = 0.0f;
+  arena_reset(layout->arena);
+  layout->row_capacity = layout_estimate_row_count(*layout, doc, wrap_enabled);
+  assert(layout->row_capacity != 0);
+  layout->rows =
+      ARENA_PUSH_ARRAY(layout->arena, layout->row_capacity, LayoutRow);
+
+  f32 px = 0;
+  f32 py = 0;
+  u32 len = doc_get_length(doc);
+  LayoutRow *current_row = &layout->rows[0];
+  if (wrap_enabled) {
+    for (u32 i = 0; i < len; i++) {
+      char c = doc_get_char(doc, i);
+      float advance = layout_get_advance(*layout, c);
+
+      bool hard_break = c == '\n';
+      bool soft_break = px + advance > layout->wrap_width;
+      if (hard_break || soft_break) {
+        current_row->offset_end =
+            i + 1 - hard_break; // only add one if soft but not hard break
+        current_row->w = px;
+        current_row->h = layout->line_height;
+        current_row->break_kind = hard_break   ? BREAK_HARD
+                                  : soft_break ? BREAK_SOFT
+                                               : BREAK_NONE; // impossible
+
+        layout->content_width = max(layout->content_width, px);
+        px = 0;
+        py += layout->line_height;
+
+        assert(layout->row_count + 1 < layout->row_capacity);
+        current_row = &layout->rows[++layout->row_count];
+        current_row->offset_start = i + 1;
+        current_row->y = py;
+
+        continue;
+      }
+
+      px += advance;
+    }
+  } else {
+  }
+}
+
+// TODO(melvil): maybe can be directly compute
+void layout_get_visible_line(const Layout layout, const Viewport vp,
+                             u32 *line_start, u32 *line_end) {
+  *line_start = 0;
+  *line_end = layout.row_count;
+
+  for (u32 i = 0; i < layout.row_count; i++) {
+    LayoutRow *row = &layout.rows[i];
+
+    if (row->y + row->h < vp.scroll_y) {
+      continue;
+    }
+
+    *line_start = i;
+    break;
+  }
+
+  for (u32 i = *line_start; i < layout.row_count; i++) {
+    LayoutRow *row = &layout.rows[i];
+
+    if (row->y >= vp.scroll_y + vp.h) {
+      *line_end = i;
+      break;
+    }
+  }
+}
+#define layout_render(editor, atlas, list)                                     \
+  layout_quad_list((editor).layout, (editor).doc, (editor).vp, (atlas),        \
+                   (editor).color, (list))
+void layout_quad_list(const Layout layout, const Document doc,
+                      const Viewport vp, const Atlas a, const Vec4 color,
+                      QuadInstanceList *list) {
+  u32 line_start = 0, line_end = 0;
+  layout_get_visible_line(layout, vp, &line_start, &line_end);
+  f32 px = vp.x;
+  f32 py = vp.y + layout.line_height;
+  for (u32 i = line_start; i < line_end; i++) {
+    LayoutRow *row = &layout.rows[i];
+    for (u32 offset = row->offset_start; offset < row->offset_end; offset++) {
+      char c = doc_get_char(doc, offset);
+      assert(c != '\n');
+
+      f32 advance = layout_get_advance(layout, c);
+
+      if (c == ' ' || c == '\t') {
+        px += advance;
+        continue;
+      }
+
+      stbtt_bakedchar *g = atlas_get_glyph((Atlas *)&a, c);
+      f32 glyph_x = roundf(px + g->xoff);
+      f32 glyph_y = roundf(py + g->yoff);
+      // y culling should be already down -> visible line
+      if (glyph_x + advance < vp.x + vp.scroll_x ||
+          glyph_x > vp.x + vp.scroll_x + vp.w) {
+        px += advance;
+        continue;
+      }
+
+      assert(list->capacity > list->length);
+
+      // printf("%c", c);
+      list->data[list->length++] = (QuadInstance){
+          .x = glyph_x,
+          .y = glyph_y,
+          .w = (f32)(g->x1 - g->x0),
+          .h = (f32)(g->y1 - g->y0),
+          .u_min_x = (f32)g->x0 / (f32)a.w,
+          .u_min_y = (f32)g->y0 / (f32)a.h,
+          .u_max_x = (f32)g->x1 / (f32)a.w,
+          .u_max_y = (f32)g->y1 / (f32)a.h,
+          .r = color.R,
+          .g = color.G,
+          .b = color.B,
+          .a = color.A,
+      };
+
+      px += advance;
+    }
+    // printf("\n");
+    px = vp.x;
+    py += layout.line_height;
+  }
 }
 
 int compute_frame(Application *app) {
@@ -263,19 +396,19 @@ int compute_frame(Application *app) {
       .h = (f32)app->h - MARGIN_Y * 2 - 64,
   };
 
-  app->editor_viewport = (Rect){
+  Rect editor_viewport = {
       .x = outer.x + PADDING_X,
       .y = outer.y + PADDING_Y,
       .w = outer.w - PADDING_X * 2,
       .h = outer.h - PADDING_Y * 2,
   };
 
-  Rect information_viewport = {
-      .x = outer.x,
-      .y = outer.y + outer.h,
-      .w = outer.w,
-      .h = 64,
-  };
+  // Rect information_viewport = {
+  //     .x = outer.x,
+  //     .y = outer.y + outer.h,
+  //     .w = outer.w,
+  //     .h = 64,
+  // };
   // rect
   {
     render_command_execute(
@@ -295,58 +428,50 @@ int compute_frame(Application *app) {
 
   // text
   {
-    if (render_command_execute(
-            app,
-            (RenderCommand){
-                .kind = RENDER_COMMAND_TEXT,
-                .bounding_box = app->editor_viewport,
-                .text = {.str = app->editor_text,
-                         .color = {.R = 1., .G = 1., .B = 1., .A = .8f}}},
-            &app->quad_list) != app->editor_text.length) {
-      fprintf(stderr, "Unable to draw editor text.\n");
+    app->editor.vp = (Viewport){
+        .x = editor_viewport.x,
+        .y = editor_viewport.y,
+        .w = editor_viewport.w,
+        .h = editor_viewport.h,
     };
-
-    // green
-    f32 w, h;
-    compute_text_size(app, app->editor_text, &w, &h, app->editor_viewport);
-    render_command_execute(
-        app,
-        (RenderCommand){
-            .kind = RENDER_COMMAND_RECT,
-            .bounding_box = app->editor_viewport,
-            .rect = {.color = {.R = 0., .G = 1., .B = .0, .A = .1f}}},
-        &app->quad_list);
+    app->editor.layout.wrap_width = editor_viewport.w;
+    layout_update(&app->editor.layout, app->editor.doc,
+                  app->editor.wrap_enabled);
+    layout_render(app->editor, app->atlas, &app->quad_list);
   }
 
   // cursor
-  Rect cursor_rect;
-  compute_cursor_rect(app, app->editor_cursor, app->editor_text, &cursor_rect);
-  render_command_execute(
-      app,
-      (RenderCommand){.kind = RENDER_COMMAND_RECT,
-                      .bounding_box = cursor_rect,
-                      .rect = {.color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
-      &app->quad_list);
+  // Rect cursor_rect;
+  // compute_cursor_rect(app, app->editor_cursor, app->editor_text,
+  // &cursor_rect); render_command_execute(
+  //     app,
+  //     (RenderCommand){.kind = RENDER_COMMAND_RECT,
+  //                     .bounding_box = cursor_rect,
+  //                     .rect = {.color = {.R = 1., .G = 1., .B = 1., .A
+  //                     = 1.}}},
+  //     &app->quad_list);
 
-  // information
-  ArenaTemp temp = arena_temp_begin(app->scratch_arena);
-  Str information_str =
-      str_format(temp.arena, "col=%u ; row=%u ;text_advance=%u\nFPS: %f",
-                 app->editor_cursor._col, app->editor_cursor._row,
-                 app->editor_cursor.text_pos, app->fps);
-  render_command_execute(
-      app,
-      (RenderCommand){.kind = RENDER_COMMAND_RECT,
-                      .bounding_box = information_viewport,
-                      .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 1.}}},
-      &app->quad_list);
-  render_command_execute(
-      app,
-      (RenderCommand){.kind = RENDER_COMMAND_TEXT,
-                      .bounding_box = information_viewport,
-                      .text = {.str = information_str,
-                               .color = {.R = 1., .G = 1., .B = 1., .A = 1.}}},
-      &app->quad_list);
+  // // information
+  // ArenaTemp temp = arena_temp_begin(app->scratch_arena);
+  // Str information_str =
+  //     str_format(temp.arena, "col=%u ; row=%u ;text_advance=%u\nFPS: %f",
+  //                app->editor_cursor._col, app->editor_cursor._row,
+  //                app->editor_cursor.text_pos, app->fps);
+  // render_command_execute(
+  //     app,
+  //     (RenderCommand){.kind = RENDER_COMMAND_RECT,
+  //                     .bounding_box = information_viewport,
+  //                     .rect = {.color = {.R = 1., .G = 0., .B = 0., .A
+  //                     = 1.}}},
+  //     &app->quad_list);
+  // render_command_execute(
+  //     app,
+  //     (RenderCommand){.kind = RENDER_COMMAND_TEXT,
+  //                     .bounding_box = information_viewport,
+  //                     .text = {.str = information_str,
+  //                              .color = {.R = 1., .G = 1., .B = 1., .A
+  //                              = 1.}}},
+  //     &app->quad_list);
 
   app->editor_quad_is_dirty = true;
   return 0;
@@ -394,21 +519,34 @@ void on_resize(Application *app, u32 w, u32 h) {
 }
 
 void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
+  (void)app;
   (void)scancode;
-  (void)mods;
+  if (mods == GLFW_MOD_CONTROL) {
+  }
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
     if (key == GLFW_KEY_UP) {
-      compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
+      // compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
     }
     if (key == GLFW_KEY_DOWN) {
-      compute_cursor(&app->editor_cursor, app->editor_text, 1, 0);
+      // compute_cursor(&app->editor_cursor, app->editor_text, 1, 0);
     }
 
     if (key == GLFW_KEY_LEFT) {
-      compute_cursor(&app->editor_cursor, app->editor_text, 0, -1);
+      // i32 d_col = 1;
+      // if (mods == GLFW_MOD_CONTROL) {
+      //   d_col = find_space_next(app->editor_text,
+      //   app->editor_cursor.text_pos) -
+      //           app->editor_cursor.text_pos;
+      // }
+      // compute_cursor(&app->editor_cursor, app->editor_text, 0, -1);
     }
     if (key == GLFW_KEY_RIGHT) {
-      compute_cursor(&app->editor_cursor, app->editor_text, 0, 1);
+      // if (mods == GLFW_MOD_CONTROL) {
+      //   d_col = find_space_next(app->editor_text,
+      //   app->editor_cursor.text_pos) -
+      //           app->editor_cursor.text_pos;
+      // }
+      // compute_cursor(&app->editor_cursor, app->editor_text, 0, 1);
     }
   }
 }

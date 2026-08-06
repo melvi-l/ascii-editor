@@ -44,11 +44,17 @@ typedef struct {
   f32 x, y, w, h;
 } Rect;
 
+typedef enum CaretAffinity {
+  CARET_AFFINITY_UPSTREAM,
+  CARET_AFFINITY_DOWNSTREAM
+} CaretAffinity;
 typedef struct Cursor {
-  u32 text_pos;
-  u32 _col;
-  u32 _row;
-  u32 desired_col;
+  u32 offset;
+
+  u32 prefered_col;
+  bool prefered_col_valid;
+
+  CaretAffinity affinity;
 } Cursor;
 
 typedef struct Atlas {
@@ -66,13 +72,59 @@ typedef struct Atlas {
   f32 white_y;
 } Atlas;
 
+typedef Str PieceTable;
+
+typedef struct Document {
+  PieceTable table;
+  u64 revision;
+} Document;
+typedef enum BreakKind {
+  BREAK_NONE = 0,
+  BREAK_SOFT,
+  BREAK_HARD,
+} BreakKind;
+typedef struct LayoutRow {
+  u32 offset_start;
+  u32 offset_end;
+  BreakKind break_kind;
+
+  f32 y, w, h;
+} LayoutRow;
+typedef struct Layout {
+  Arena *arena;
+  LayoutRow *rows;
+  u32 row_count;
+  u32 row_capacity;
+
+  float wrap_width;
+  float glyph_advance;
+  float line_height;
+
+  float content_width;
+  float content_height;
+
+  u64 document_revision;
+} Layout;
+typedef struct Viewport {
+  float x, y;
+  float w, h;
+  float scroll_x, scroll_y;
+} Viewport;
+typedef struct Editor {
+  Document doc;
+  Cursor cursor;
+  Layout layout;
+  Viewport vp;
+
+  Vec4 color;
+  bool wrap_enabled;
+} Editor;
+
 typedef struct Application {
-  Str editor_text;
-  bool editor_quad_is_dirty;
-  Rect editor_viewport;
-  Cursor editor_cursor;
+  Editor editor;
 
   QuadInstanceList quad_list;
+  bool editor_quad_is_dirty;
 
   u32 w, h;
 

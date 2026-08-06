@@ -139,12 +139,6 @@ int main(int argc, char **argv) {
       .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
   };
 
-  app.quad_list = (QuadInstanceList){
-      .data = ARENA_PUSH_ARRAY(app.vulkan_arena, max_quad_count, QuadInstance),
-      .length = 0,
-      .capacity = max_quad_count,
-  };
-
   if (plat_init(&app.plat, host_resize, &app) != 0) {
     return EXIT_FAILURE;
   }
@@ -159,14 +153,30 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  plat_get_window_size(&app.plat, &app.w, &app.h);
+  Editor editor = {.color = {.R = 1., .G = 1., .B = 1., .A = 1.},
+                   .wrap_enabled = true};
 
-  app.editor_cursor = (Cursor){.text_pos = 0, ._col = 0, ._row = 0};
+  Arena *layout_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE);
+  editor.layout = (Layout){
+      .arena = layout_arena,
+      .line_height = app.atlas.line_height,
+      .glyph_advance = app.atlas.advance,
+  };
 
-  if (!read_file(app.vulkan_arena, filepath, &app.editor_text)) {
+  app.editor = editor;
+
+  if (!read_file(app.vulkan_arena, filepath, &app.editor.doc.table)) {
     fprintf(stderr, "Unable to open editor file\n");
     goto cleanup;
   }
+
+  app.quad_list = (QuadInstanceList){
+      .data = ARENA_PUSH_ARRAY(app.vulkan_arena, max_quad_count, QuadInstance),
+      .length = 0,
+      .capacity = max_quad_count,
+  };
+
+  plat_get_window_size(&app.plat, &app.w, &app.h);
 
   if (!rd_create_instance(&app)) {
     goto cleanup;
