@@ -2,12 +2,23 @@
 #define BASE_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "common/common.h"
+
+#ifdef HOT_RELOAD
 #include "host/reload.h"
+#endif
 
 #include "host/platform.c"
 #include "host/vulkan.c"
 
+#ifndef HOT_RELOAD
+#include "lib/main.c"
+#endif
+
+#ifdef HOT_RELOAD
 static Reload g_reload;
+#else
+static LibAPI g_api;
+#endif
 
 // @font-atlas
 static int init_atlas(Arena *arena, Str font_path, Atlas *a) {
@@ -81,21 +92,36 @@ static void host_resize(u32 width, u32 height, void *user_data) {
   app->w = width;
   app->h = height;
   rd_resize(app);
+#ifdef HOT_RELOAD
   if (g_reload.handle)
     g_reload.api.resize(app, width, height);
+#else
+  if (g_api.resize)
+    g_api.resize(app, width, height);
+#endif
 }
 
 static void host_key(i32 key, i32 scancode, i32 action, i32 mods,
                      void *user_data) {
   Application *app = user_data;
+#ifdef HOT_RELOAD
   if (g_reload.handle)
     g_reload.api.key(app, key, scancode, action, mods);
+#else
+  if (g_api.key)
+    g_api.key(app, key, scancode, action, mods);
+#endif
 }
 
 static void host_char(u32 c, void *user_data) {
   Application *app = user_data;
+#ifdef HOT_RELOAD
   if (g_reload.handle)
     g_reload.api.char_input(app, c);
+#else
+  if (g_api.char_input)
+    g_api.char_input(app, c);
+#endif
 }
 
 int main(int argc, char **argv) {
@@ -159,6 +185,7 @@ int main(int argc, char **argv) {
   rd_create_pipeline(&app);
   rd_create_descriptor_set(&app);
 
+#ifdef HOT_RELOAD
   g_reload = (Reload){
       .path = "./build/libapp.so",
       .app = &app,
@@ -167,6 +194,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "host: failed to open lib\n");
     goto cleanup;
   }
+#else
+  g_api = lib_get_api();
+  g_api.load(&app);
+#endif
 
   f64 _fps = 0;
   Timer fps_timer = {.interval_ms = 500};
@@ -180,12 +211,22 @@ int main(int argc, char **argv) {
     }
 
     if (timer_tick(&reasonnable_timer)) {
+#ifdef HOT_RELOAD
       reload_poll(&g_reload);
+#endif
     }
+#ifdef HOT_RELOAD
     g_reload.api.update(&app);
+#else
+    g_api.update(&app);
+#endif
   }
 
+#ifdef HOT_RELOAD
   reload_close(&g_reload);
+#else
+  g_api.unload(&app);
+#endif
 
 cleanup:
   rd_cleanup(&app);

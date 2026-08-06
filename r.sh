@@ -14,10 +14,10 @@ MODE="${2:-debug}"
 cflags_for_mode() {
   case "$1" in
     debug)
-      echo "-g3 -O0 -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -DDEBUG -DVK_ENABLE_VALIDATION"
+      echo "-g3 -O0 -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -DDEBUG -DVK_ENABLE_VALIDATION -DHOT_RELOAD"
       ;;
     debug-sanitize)
-      echo "-g3 -O0 -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -fanalyzer -fsanitize=address,undefined -fno-omit-frame-pointer -DDEBUG -DVK_ENABLE_VALIDATION"
+      echo "-g3 -O0 -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -fanalyzer -fsanitize=address,undefined -fno-omit-frame-pointer -DDEBUG -DVK_ENABLE_VALIDATION -DHOT_RELOAD"
       ;;
     release)
       echo "-O2 -DNDEBUG"
@@ -46,8 +46,12 @@ build_shaders() {
 build_host() {
   local cflags; cflags=$(cflags_for_mode "$MODE")
   local t0=$SECONDS
-  gcc $cflags -rdynamic "$SRC_DIR/host/main.c" -o "$BUILD_DIR/$HOST_EXEC" \
-    $COMMON_LIBS -ldl -I"$SRC_DIR" -Iexternal
+  local extra=""
+  if [ "$MODE" != "release" ]; then
+    extra="-rdynamic -ldl"
+  fi
+  gcc $cflags $extra "$SRC_DIR/host/main.c" -o "$BUILD_DIR/$HOST_EXEC" \
+    $COMMON_LIBS -I"$SRC_DIR" -Iexternal
   printf '[host]    built %s (%s, %ds)\n' "$HOST_EXEC" "$MODE" "$((SECONDS - t0))"
 }
 
@@ -75,14 +79,14 @@ case "$SUBCMD" in
     # full: shaders + host + lib + run
     build_shaders
     build_host
-    build_lib
+    [ "$MODE" != "release" ] && build_lib
     run_host
     ;;
   build)
     # full build, no run
     build_shaders
     build_host
-    build_lib
+    [ "$MODE" != "release" ] && build_lib
     ;;
   host)
     # host only (no run)
@@ -90,7 +94,11 @@ case "$SUBCMD" in
     ;;
   lib)
     # lib only — hot reload target
-    build_lib
+    if [ "$MODE" = "release" ]; then
+      printf '[lib]     skipped (release has no separate lib)\n'
+    else
+      build_lib
+    fi
     ;;
   run)
     # run existing binary
@@ -120,6 +128,7 @@ Examples:
   $0                    # full debug build + run
   $0 lib                # recompile lib only (hot reload)
   $0 build release      # full release build, no run
+  $0 all release        # full release build + run
 EOF
     exit 1
     ;;
