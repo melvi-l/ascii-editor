@@ -9,6 +9,26 @@
 typedef void (*PlatResizeCallback)(u32 width, u32 height, void *user_data);
 typedef void (*PlatCharCallback)(u32 c, void *user_data);
 typedef void (*PlatKeyCallback)(i32 key, i32 scancode, i32 action, i32 mods, void *user_data);
+
+typedef enum {
+  PLAT_MOUSE_MOVE,
+  PLAT_MOUSE_BUTTON,
+  PLAT_MOUSE_SCROLL,
+  PLAT_MOUSE_ENTER,
+} PlatMouseKind;
+
+typedef struct {
+  PlatMouseKind kind;
+  union {
+    struct { f64 x, y; }               move;
+    struct { i32 button, action, mods; } button;
+    struct { f64 xoff, yoff; }         scroll;
+    struct { bool entered; }           enter;
+  } u;
+} PlatMouseEvent;
+
+typedef void (*PlatMouseCallback)(const PlatMouseEvent *ev, void *user_data);
+
 typedef GLFWwindow PlatWindow;
 typedef struct {
   PlatWindow *window;
@@ -16,6 +36,7 @@ typedef struct {
   PlatResizeCallback resize_callback;
   PlatCharCallback char_callback;
   PlatKeyCallback key_callback;
+  PlatMouseCallback mouse_callback;
   void *user_data;
 } Platform;
 
@@ -36,5 +57,7 @@ bool plat_should_close(Platform *plat);
 void plat_poll_events();
 
 f64 plat_compute_fps();
+
+void plat_set_mouse_callback(Platform *plat, PlatMouseCallback callback);
 
 #endif // PLATFORM_H

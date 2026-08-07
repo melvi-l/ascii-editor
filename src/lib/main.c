@@ -26,8 +26,9 @@ LibAPI lib_get_api(void) {
       .load = lib_load,
       .unload = lib_unload,
       .update = lib_update,
-      .resize = on_resize,
-      .key = on_key,
-      .char_input = on_char_input,
+      .on_resize = on_resize,
+      .on_key = on_key,
+      .on_char = on_char_input,
+      .on_mouse = on_mouse,
   };
 }

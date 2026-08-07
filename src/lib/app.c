@@ -500,9 +500,9 @@ static u32 decimal_digit_count(u32 value) {
   return count;
 }
 f32 gutter_get_width(const Layout *layout) {
+  if (layout->row_count < 1)
+    return 1;
   LayoutRow *last_row = &layout->rows[layout->row_count - 1];
-  printf("last row index %u -> %u digit\n", last_row->logical_line_index,
-         decimal_digit_count(last_row->logical_line_index));
   f32 max_width = (f32)decimal_digit_count(last_row->logical_line_index) *
                   layout->glyph_advance;
   return max_width;
@@ -604,7 +604,6 @@ int compute_frame(Application *app) {
   // text
   {
     app->editor.color = (Vec4){.R = 1., .G = 1., .B = 1., .A = 0.8f};
-    app->editor.layout.wrap_width = editor_viewport.w;
     layout_update(&app->editor.layout, app->editor.doc,
                   app->editor.wrap_enabled);
     app->editor.gutter.kind = GUTTER_ABSOLUTE;
@@ -630,14 +629,13 @@ int compute_frame(Application *app) {
             .rect = {.color = {.R = 0., .G = 0., .B = 1., .A = .05f}}},
         &app->quad_list);
     gutter_render(app, &gutter_rect, &gutter_color);
-    app->editor.vp = (Viewport){
-        .x = editor_viewport.x + gutter_rect.w + 16,
-        .y = editor_viewport.y,
-        .w = editor_viewport.w - gutter_width + 16,
-        .h = editor_viewport.h,
-        .scroll_x = 0,
-        .scroll_y = 500,
-    };
+    app->editor.vp.x = editor_viewport.x + gutter_rect.w + 16;
+    app->editor.vp.y = editor_viewport.y;
+    app->editor.vp.w = editor_viewport.w - gutter_width - 16;
+    app->editor.vp.h = editor_viewport.h;
+
+    app->editor.wrap_enabled = true;
+    app->editor.layout.wrap_width = editor_viewport.w;
     render_command_execute(
         &app->atlas,
         (RenderCommand){
@@ -768,6 +766,28 @@ void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
 void on_char_input(Application *app, u32 c) {
   (void)app;
   printf("on_char %c\n", c);
+}
+
+#define SCROLL_FACTOR 20
+void on_mouse(Application *app, const PlatMouseEvent *ev) {
+  switch (ev->kind) {
+  case PLAT_MOUSE_MOVE: /* ev->u.move.x, .y */
+    break;
+  case PLAT_MOUSE_BUTTON: /* ev->u.button.button/action/mods */
+    break;
+  case PLAT_MOUSE_SCROLL:
+    printf("%f\n", (f32)ev->u.scroll.xoff);
+    printf("%f\n", (f32)ev->u.scroll.yoff);
+    app->editor.vp.scroll_x -= (f32)ev->u.scroll.xoff * SCROLL_FACTOR;
+    app->editor.vp.scroll_y -= (f32)ev->u.scroll.yoff * SCROLL_FACTOR;
+    printf("%f\n", app->editor.vp.scroll_x);
+    printf("%f\n", app->editor.vp.scroll_y);
+    layout_update(&app->editor.layout, app->editor.doc,
+                  app->editor.wrap_enabled);
+    break;
+  case PLAT_MOUSE_ENTER: /* ev->u.enter.entered */
+    break;
+  }
 }
 
 void update(Application *app) {

@@ -87,40 +87,51 @@ static int init_atlas(Arena *arena, Str font_path, Atlas *a) {
   return 0;
 }
 
-static void host_resize(u32 width, u32 height, void *user_data) {
+static void host_on_resize(u32 width, u32 height, void *user_data) {
   Application *app = user_data;
   app->w = width;
   app->h = height;
   rd_resize(app);
 #ifdef HOT_RELOAD
-  if (g_reload.handle)
-    g_reload.api.resize(app, width, height);
+  if (g_reload.handle && g_reload.api.on_resize)
+    g_reload.api.on_resize(app, width, height);
 #else
-  if (g_api.resize)
-    g_api.resize(app, width, height);
+  if (g_api.on_resize)
+    g_api.on_resize(app, width, height);
 #endif
 }
 
-static void host_key(i32 key, i32 scancode, i32 action, i32 mods,
-                     void *user_data) {
+static void host_on_key(i32 key, i32 scancode, i32 action, i32 mods,
+                        void *user_data) {
   Application *app = user_data;
 #ifdef HOT_RELOAD
-  if (g_reload.handle)
-    g_reload.api.key(app, key, scancode, action, mods);
+  if (g_reload.handle && g_reload.api.on_key)
+    g_reload.api.on_key(app, key, scancode, action, mods);
 #else
-  if (g_api.key)
-    g_api.key(app, key, scancode, action, mods);
+  if (g_api.on_key)
+    g_api.on_key(app, key, scancode, action, mods);
 #endif
 }
 
-static void host_char(u32 c, void *user_data) {
+static void host_on_char(u32 c, void *user_data) {
   Application *app = user_data;
 #ifdef HOT_RELOAD
-  if (g_reload.handle)
-    g_reload.api.char_input(app, c);
+  if (g_reload.handle && g_reload.api.on_char)
+    g_reload.api.on_char(app, c);
 #else
-  if (g_api.char_input)
-    g_api.char_input(app, c);
+  if (g_api.on_char)
+    g_api.on_char(app, c);
+#endif
+}
+
+static void host_on_mouse(const PlatMouseEvent *ev, void *user_data) {
+  Application *app = user_data;
+#ifdef HOT_RELOAD
+  if (g_reload.handle && g_reload.api.on_mouse)
+    g_reload.api.on_mouse(app, ev);
+#else
+  if (g_api.on_mouse)
+    g_api.on_mouse(app, ev);
 #endif
 }
 
@@ -139,12 +150,13 @@ int main(int argc, char **argv) {
       .scratch_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE),
   };
 
-  if (plat_init(&app.plat, host_resize, &app) != 0) {
+  if (plat_init(&app.plat, host_on_resize, &app) != 0) {
     return EXIT_FAILURE;
   }
 
-  plat_set_char_callback(&app.plat, host_char);
-  plat_set_key_callback(&app.plat, host_key);
+  plat_set_char_callback(&app.plat, host_on_char);
+  plat_set_key_callback(&app.plat, host_on_key);
+  plat_set_mouse_callback(&app.plat, host_on_mouse);
 
   if (init_atlas(
           app.vulkan_arena,
@@ -154,7 +166,7 @@ int main(int argc, char **argv) {
   }
 
   Editor editor = {.color = {.R = 1., .G = 1., .B = 1., .A = 1.},
-                   .wrap_enabled = true};
+                   .wrap_enabled = false};
 
   Arena *layout_arena = arena_create(ARENA_DEFAULT_BLOCK_SIZE);
   editor.layout = (Layout){

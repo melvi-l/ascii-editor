@@ -101,6 +101,49 @@ void plat_set_key_callback(Platform *plat, PlatKeyCallback callback) {
   plat->key_callback = callback;
   glfwSetKeyCallback(plat->window, key_callback);
 }
+static void mouse_pos_cb(GLFWwindow *window, double x, double y) {
+  Platform *plat = glfwGetWindowUserPointer(window);
+  if (plat->mouse_callback != NULL) {
+    PlatMouseEvent ev = { .kind = PLAT_MOUSE_MOVE, .u.move = { x, y } };
+    plat->mouse_callback(&ev, plat->user_data);
+  }
+}
+
+static void mouse_button_cb(GLFWwindow *window, int button, int action,
+                            int mods) {
+  Platform *plat = glfwGetWindowUserPointer(window);
+  if (plat->mouse_callback != NULL) {
+    PlatMouseEvent ev = { .kind = PLAT_MOUSE_BUTTON,
+                          .u.button = { button, action, mods } };
+    plat->mouse_callback(&ev, plat->user_data);
+  }
+}
+
+static void mouse_scroll_cb(GLFWwindow *window, double xoff, double yoff) {
+  Platform *plat = glfwGetWindowUserPointer(window);
+  if (plat->mouse_callback != NULL) {
+    PlatMouseEvent ev = { .kind = PLAT_MOUSE_SCROLL,
+                          .u.scroll = { xoff, yoff } };
+    plat->mouse_callback(&ev, plat->user_data);
+  }
+}
+
+static void mouse_enter_cb(GLFWwindow *window, int entered) {
+  Platform *plat = glfwGetWindowUserPointer(window);
+  if (plat->mouse_callback != NULL) {
+    PlatMouseEvent ev = { .kind = PLAT_MOUSE_ENTER,
+                          .u.enter = { entered != 0 } };
+    plat->mouse_callback(&ev, plat->user_data);
+  }
+}
+
+void plat_set_mouse_callback(Platform *plat, PlatMouseCallback callback) {
+  plat->mouse_callback = callback;
+  glfwSetCursorPosCallback(plat->window, mouse_pos_cb);
+  glfwSetCursorEnterCallback(plat->window, mouse_enter_cb);
+  glfwSetMouseButtonCallback(plat->window, mouse_button_cb);
+  glfwSetScrollCallback(plat->window, mouse_scroll_cb);
+}
 
 f64 plat_compute_fps() {
   static f64 start_time_ms = 0.0;
