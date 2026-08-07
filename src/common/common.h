@@ -87,6 +87,7 @@ typedef struct LayoutRow {
   u32 offset_start;
   u32 offset_end;
   BreakKind break_kind;
+  u32 logical_line_index;
 
   f32 y, w, h;
 } LayoutRow;
@@ -95,6 +96,7 @@ typedef struct Layout {
   LayoutRow *rows;
   u32 row_count;
   u32 row_capacity;
+  u32 hard_break_count;
 
   float wrap_width;
   float glyph_advance;
@@ -110,11 +112,19 @@ typedef struct Viewport {
   float w, h;
   float scroll_x, scroll_y;
 } Viewport;
+typedef enum GutterKind {
+  GUTTER_NONE,
+  GUTTER_ABSOLUTE,
+} GutterKind;
+typedef struct Gutter {
+  GutterKind kind;
+} Gutter;
 typedef struct Editor {
   Document doc;
   Cursor cursor;
   Layout layout;
   Viewport vp;
+  Gutter gutter;
 
   Vec4 color;
   bool wrap_enabled;

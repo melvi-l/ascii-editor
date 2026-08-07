@@ -13,12 +13,12 @@
 #define indices_count 6
 
 // @atlas
-static stbtt_bakedchar *atlas_get_glyph(Atlas *a, const char c) {
+static const stbtt_bakedchar *atlas_get_glyph(const Atlas *a, const char c) {
   return &a->glyphs[c - FIRST_CHAR];
 }
 
 // @render-command
-u32 render_command_execute(Application *app, RenderCommand cmd,
+u32 render_command_execute(const Atlas *atlas, RenderCommand cmd,
                            QuadInstanceList *list) {
   switch (cmd.kind) {
   case RENDER_COMMAND_RECT:
@@ -31,10 +31,10 @@ u32 render_command_execute(Application *app, RenderCommand cmd,
         .y = cmd.bounding_box.y,
         .w = cmd.bounding_box.w,
         .h = cmd.bounding_box.h,
-        .u_min_x = app->atlas.white_x,
-        .u_min_y = app->atlas.white_y,
-        .u_max_x = app->atlas.white_x,
-        .u_max_y = app->atlas.white_y,
+        .u_min_x = atlas->white_x,
+        .u_min_y = atlas->white_y,
+        .u_max_x = atlas->white_x,
+        .u_max_y = atlas->white_y,
         .r = cmd.rect.color.R,
         .g = cmd.rect.color.G,
         .b = cmd.rect.color.B,
@@ -42,44 +42,39 @@ u32 render_command_execute(Application *app, RenderCommand cmd,
     };
     return 1;
   case RENDER_COMMAND_TEXT:
-    Atlas *atlas = &app->atlas;
     f32 px = cmd.bounding_box.x;
-    f32 py = cmd.bounding_box.y + (f32)app->atlas.ascent;
+    f32 baseline_y = cmd.bounding_box.y + (f32)atlas->ascent;
     for (u32 i = 0; i < cmd.text.str.length; i++) {
       char c = (char)cmd.text.str.data[i];
 
       if (c == '\n') {
         px = cmd.bounding_box.x;
-        py += atlas->line_height;
+        baseline_y += atlas->line_height;
         continue;
       }
 
       if (c < FIRST_CHAR)
         continue;
 
-      stbtt_bakedchar *g = atlas_get_glyph(atlas, c);
+      const stbtt_bakedchar *g = atlas_get_glyph(atlas, c);
+      f32 glyph_x = roundf(px + g->xoff);
+      f32 glyph_y = roundf(baseline_y + g->yoff);
 
       if (c == ' ') {
         px += g->xadvance;
         continue;
       }
 
-      if (px < cmd.bounding_box.x ||
-          px > cmd.bounding_box.x + cmd.bounding_box.w ||
-          py < cmd.bounding_box.y ||
-          py > cmd.bounding_box.y + cmd.bounding_box.h) {
+      if (glyph_x + g->xadvance < cmd.bounding_box.x ||
+          glyph_x > cmd.bounding_box.x + cmd.bounding_box.w ||
+          glyph_y + atlas->line_height < cmd.bounding_box.y ||
+          glyph_y > cmd.bounding_box.y + cmd.bounding_box.h) {
         // px = cmd.bounding_box.x;
         // py += atlas->line_height;
         continue;
       }
 
-      f32 glyph_x = roundf(px + g->xoff);
-      f32 glyph_y = roundf(py + g->yoff);
-
-      if (list->capacity - list->length <= 0) {
-        return i;
-      }
-
+      assert(list->length <= list->capacity);
       list->data[list->length++] = (QuadInstance){
           .x = glyph_x,
           .y = glyph_y,
@@ -221,7 +216,17 @@ static u32 doc_next_offset(const Document doc, u32 offset) {
 #define LAYOUT_ROW_TOLERANCE 10
 static u32 layout_estimate_row_count(const Layout layout, const Document doc,
                                      bool wrap_enabled) {
-  assert(wrap_enabled);
+  if (!wrap_enabled) {
+    // TODO(melvil): optimize
+    u32 hard_break_count = 0;
+    u32 len = doc_get_length(doc);
+    for (u32 i = 0; i < len; i++) {
+      if (doc_get_char(doc, i) == '\n') {
+        hard_break_count++;
+      }
+    }
+    return hard_break_count + 1;
+  }
   return (u32)((float)doc_get_length(doc) / layout.glyph_advance *
                LAYOUT_ROW_TOLERANCE);
 }
@@ -256,6 +261,7 @@ void layout_update(Layout *layout, const Document doc, bool wrap_enabled) {
   layout->rows = NULL;
   layout->row_count = 0;
   layout->row_capacity = 0;
+  layout->hard_break_count = 0;
 
   layout->content_width = 0.0f;
   layout->content_height = 0.0f;
@@ -269,37 +275,36 @@ void layout_update(Layout *layout, const Document doc, bool wrap_enabled) {
   f32 py = 0;
   u32 len = doc_get_length(doc);
   LayoutRow *current_row = &layout->rows[0];
-  if (wrap_enabled) {
-    for (u32 i = 0; i < len; i++) {
-      char c = doc_get_char(doc, i);
-      float advance = layout_get_advance(*layout, c);
+  for (u32 i = 0; i < len; i++) {
+    char c = doc_get_char(doc, i);
+    float advance = layout_get_advance(*layout, c);
 
-      bool hard_break = c == '\n';
-      bool soft_break = px + advance > layout->wrap_width;
-      if (hard_break || soft_break) {
-        current_row->offset_end =
-            i + 1 - hard_break; // only add one if soft but not hard break
-        current_row->w = px;
-        current_row->h = layout->line_height;
-        current_row->break_kind = hard_break   ? BREAK_HARD
-                                  : soft_break ? BREAK_SOFT
-                                               : BREAK_NONE; // impossible
+    bool hard_break = c == '\n';
+    bool soft_break = px + advance > layout->wrap_width;
+    if (hard_break || (wrap_enabled && soft_break)) {
+      current_row->offset_end =
+          i + 1 - hard_break; // only add one if soft but not hard break
+      current_row->w = px;
+      current_row->h = layout->line_height;
+      current_row->break_kind = hard_break   ? BREAK_HARD
+                                : soft_break ? BREAK_SOFT
+                                             : BREAK_NONE; // impossible
+      current_row->logical_line_index = layout->hard_break_count;
+      layout->hard_break_count += hard_break;
 
-        layout->content_width = max(layout->content_width, px);
-        px = 0;
-        py += layout->line_height;
+      layout->content_width = max(layout->content_width, px);
+      px = 0;
+      py += layout->line_height;
 
-        assert(layout->row_count + 1 < layout->row_capacity);
-        current_row = &layout->rows[++layout->row_count];
-        current_row->offset_start = i + 1;
-        current_row->y = py;
+      assert(layout->row_count < layout->row_capacity);
+      current_row = &layout->rows[++layout->row_count];
+      current_row->offset_start = i + 1;
+      current_row->y = py;
 
-        continue;
-      }
-
-      px += advance;
+      continue;
     }
-  } else {
+
+    px += advance;
   }
 }
 
@@ -354,7 +359,7 @@ void layout_quad_list(const Layout layout, const Document doc,
         continue;
       }
 
-      stbtt_bakedchar *g = atlas_get_glyph((Atlas *)&a, c);
+      const stbtt_bakedchar *g = atlas_get_glyph((Atlas *)&a, c);
       f32 glyph_x = roundf(px + g->xoff);
       f32 glyph_y = roundf(baseline_y + g->yoff);
       // y culling should be already down -> visible line
@@ -482,6 +487,74 @@ void cursor_quad_list(Cursor *cursor, const Layout layout, const Document doc,
   debug_cursor.c = doc_get_char(doc, cursor->offset);
 }
 
+//
+// @gutter
+static u32 decimal_digit_count(u32 value) {
+  u32 count = 1;
+
+  while (value >= 10) {
+    value /= 10;
+    count++;
+  }
+
+  return count;
+}
+f32 gutter_get_width(const Layout *layout) {
+  LayoutRow *last_row = &layout->rows[layout->row_count - 1];
+  printf("last row index %u -> %u digit\n", last_row->logical_line_index,
+         decimal_digit_count(last_row->logical_line_index));
+  f32 max_width = (f32)decimal_digit_count(last_row->logical_line_index) *
+                  layout->glyph_advance;
+  return max_width;
+}
+#define gutter_render(app, rect, color)                                        \
+  gutter_quad_list(&(app)->editor.gutter, rect, &(app)->editor.layout,         \
+                   &(app)->editor.vp, &(app)->atlas, (color),                  \
+                   &(app)->quad_list)
+void gutter_quad_list(const Gutter *gutter, const Rect *rect,
+                      const Layout *layout, const Viewport *vp, const Atlas *a,
+                      const Vec4 *color, QuadInstanceList *list) {
+  u32 line_start = 0, line_end = 0;
+  layout_get_visible_line(*layout, *vp, &line_start, &line_end);
+  switch (gutter->kind) {
+  case GUTTER_NONE:
+    return;
+  case GUTTER_ABSOLUTE:
+    u32 last_line_index = UINT32_MAX;
+    // u32 digit_number =
+    //     decimal_digit_count(layout->rows[layout->row_count].logical_line_index);
+    for (u32 i = line_start; i < line_end; i++) {
+      LayoutRow *row = &layout->rows[i];
+
+      f32 px = rect->x;
+      f32 row_top = rect->y + row->y - vp->scroll_y;
+      // printf("line %u\n", row->logical_line_index);
+      if (row->logical_line_index == last_line_index) {
+        continue;
+      }
+      ArenaTemp temp = arena_temp_begin(layout->arena);
+      last_line_index = row->logical_line_index;
+      Str line_str = str_format(temp.arena, "%*u",
+                                (u32)roundf(rect->w / layout->glyph_advance),
+                                last_line_index + 1);
+
+      // printf("%.*s\n", STR_FMT(line_str));
+      // printf("%f\n", rect->w / layout->glyph_advance);
+      render_command_execute(
+          a,
+          (RenderCommand){.kind = RENDER_COMMAND_TEXT,
+                          .bounding_box = {.x = px,
+                                           .y = row_top,
+                                           .w = rect->w,
+                                           .h = layout->line_height},
+                          .text = {.str = line_str, .color = *color}},
+          list);
+      arena_temp_end(temp);
+    }
+    return;
+  }
+}
+
 int compute_frame(Application *app) {
   app->quad_list.length = 0;
 
@@ -514,7 +587,7 @@ int compute_frame(Application *app) {
   // rect
   {
     render_command_execute(
-        app,
+        &app->atlas,
         (RenderCommand){
             .kind = RENDER_COMMAND_RECT,
             .bounding_box =
@@ -530,16 +603,54 @@ int compute_frame(Application *app) {
 
   // text
   {
-    app->editor.vp = (Viewport){
-        .x = editor_viewport.x,
-        .y = editor_viewport.y,
-        .w = editor_viewport.w,
-        .h = editor_viewport.h,
-    };
-    app->editor.color = (Vec4){.R = 1., .G = 1., .B = 1., .A = 0.1f};
+    app->editor.color = (Vec4){.R = 1., .G = 1., .B = 1., .A = 0.8f};
     app->editor.layout.wrap_width = editor_viewport.w;
     layout_update(&app->editor.layout, app->editor.doc,
                   app->editor.wrap_enabled);
+    app->editor.gutter.kind = GUTTER_ABSOLUTE;
+    f32 gutter_width = gutter_get_width(&app->editor.layout);
+    Rect gutter_rect = {
+        .x = editor_viewport.x,
+        .y = editor_viewport.y,
+        .w = gutter_width,
+        .h = editor_viewport.h,
+    };
+    Vec4 gutter_color = {.R = 1., .G = 1., .B = 1., .A = .5f};
+    render_command_execute(
+        &app->atlas,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .bounding_box =
+                {
+                    .x = gutter_rect.x,
+                    .y = gutter_rect.y,
+                    .w = gutter_rect.w,
+                    .h = gutter_rect.h,
+                },
+            .rect = {.color = {.R = 0., .G = 0., .B = 1., .A = .05f}}},
+        &app->quad_list);
+    gutter_render(app, &gutter_rect, &gutter_color);
+    app->editor.vp = (Viewport){
+        .x = editor_viewport.x + gutter_rect.w + 16,
+        .y = editor_viewport.y,
+        .w = editor_viewport.w - gutter_width + 16,
+        .h = editor_viewport.h,
+        .scroll_x = 0,
+        .scroll_y = 500,
+    };
+    render_command_execute(
+        &app->atlas,
+        (RenderCommand){
+            .kind = RENDER_COMMAND_RECT,
+            .bounding_box =
+                {
+                    .x = app->editor.vp.x,
+                    .y = app->editor.vp.y,
+                    .w = app->editor.vp.w,
+                    .h = app->editor.vp.h,
+                },
+            .rect = {.color = {.R = 0., .G = 1., .B = 0., .A = .05f}}},
+        &app->quad_list);
     layout_render(app->editor, app->atlas, &app->quad_list);
     Vec4 cursor_color = {.R = 1., .G = 1., .B = 1., .A = 1.f};
     app->editor.cursor.affinity = CARET_AFFINITY_DOWNSTREAM;
@@ -571,13 +682,13 @@ int compute_frame(Application *app) {
       STR_FMT(prefered_col_str), debug_cursor.row->offset_start,
       debug_cursor.row->offset_end, debug_cursor.c, app->fps);
   render_command_execute(
-      app,
+      &app->atlas,
       (RenderCommand){.kind = RENDER_COMMAND_RECT,
                       .bounding_box = information_outer,
                       .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 1.}}},
       &app->quad_list);
   render_command_execute(
-      app,
+      &app->atlas,
       (RenderCommand){.kind = RENDER_COMMAND_TEXT,
                       .bounding_box = information_inner,
                       .text = {.str = information_str,
