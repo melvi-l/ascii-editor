@@ -899,52 +899,68 @@ void on_resize(Application *app, u32 w, u32 h) {
 void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
   (void)scancode;
   Editor *editor = &app->editor;
-  if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-    if (mods == GLFW_MOD_CONTROL) {
-      // cursor
-      if (key == GLFW_KEY_LEFT) {
-        cursor_move_left(&editor->cursor, editor->doc, MOVE_WORD);
-      }
-      if (key == GLFW_KEY_RIGHT) {
-        cursor_move_right(&editor->cursor, editor->doc, MOVE_WORD);
-      }
+  bool trigger = action == GLFW_PRESS || action == GLFW_REPEAT;
+  bool ctrl = mods & GLFW_MOD_CONTROL;
+  if (!trigger)
+    return;
 
-      // action
-      if (key == GLFW_KEY_0) {
+  // arrow
+  switch (key) {
+  case GLFW_KEY_LEFT:
+    if (ctrl)
+      cursor_move_left(&editor->cursor, editor->doc, MOVE_WORD);
+    else
+      cursor_move_left(&editor->cursor, editor->doc, MOVE_SIMPLE);
+    break;
+  case GLFW_KEY_RIGHT:
+    if (ctrl)
+      cursor_move_right(&editor->cursor, editor->doc, MOVE_WORD);
+    else
+      cursor_move_right(&editor->cursor, editor->doc, MOVE_SIMPLE);
+    break;
+  case GLFW_KEY_UP:
+    if (ctrl)
+      editor_add_scroll(editor, 0, -editor->layout.line_height);
+    else
+      cursor_move_up(&editor->cursor, editor->layout);
+    break;
+  case GLFW_KEY_DOWN:
+    if (ctrl)
+      editor_add_scroll(editor, 0, +editor->layout.line_height);
+    else
+      cursor_move_down(&editor->cursor, editor->layout);
+    break;
+  case GLFW_KEY_HOME:
+    if (ctrl)
+      editor->cursor.offset = 0;
+    else
+      cursor_move_left(&editor->cursor, editor->doc, MOVE_LINE_START);
+    break;
+  case GLFW_KEY_END:
+    if (ctrl)
+      editor->cursor.offset = doc_get_length(editor->doc) - 1;
+    else
+      cursor_move_right(&editor->cursor, editor->doc, MOVE_LINE_END);
+    break;
+  }
+  // ctrl key command
+  if (ctrl) {
+    switch (key) {
+    case GLFW_KEY_0:
+      if (ctrl) {
         app->editor.vp.scroll_x = 0;
         app->editor.vp.scroll_y = 0;
       }
-
-      // information mode
-      if (key == GLFW_KEY_G) {
-        printf("mod_graphics\n");
-        info_mode = INFO_GRAPHICS;
-      }
-      if (key == GLFW_KEY_R) {
-        printf("mod_graphics\n");
-        info_mode = INFO_ROW;
-      }
-      if (key == GLFW_KEY_R) {
-        printf("mod_graphics\n");
-        info_mode = INFO_ROW;
-      }
-      if (key == GLFW_KEY_S) {
-        printf("mod_graphics\n");
-        info_mode = INFO_SCROLL;
-      }
-    } else {
-      if (key == GLFW_KEY_UP) {
-        cursor_move_up(&editor->cursor, editor->layout);
-      }
-      if (key == GLFW_KEY_DOWN) {
-        cursor_move_down(&editor->cursor, editor->layout);
-      }
-      if (key == GLFW_KEY_LEFT) {
-        cursor_move_left(&editor->cursor, editor->doc, MOVE_SIMPLE);
-      }
-      if (key == GLFW_KEY_RIGHT) {
-        cursor_move_right(&editor->cursor, editor->doc, MOVE_SIMPLE);
-      }
+      break;
+    case GLFW_KEY_G:
+      info_mode = INFO_GRAPHICS;
+      break;
+    case GLFW_KEY_R:
+      info_mode = INFO_ROW;
+      break;
+    case GLFW_KEY_S:
+      info_mode = INFO_SCROLL;
+      break;
     }
   }
 }
