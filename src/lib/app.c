@@ -522,10 +522,19 @@ void cursor_quad_list(Cursor *cursor, const Layout layout, const Document doc,
 //
 // @editor
 void editor_set_scroll(Editor *editor, f32 scroll_x, f32 scroll_y) {
-  editor->vp.scroll_x =
-      clamp(scroll_x, editor->vp.w - editor->layout.content_width, 0);
-  editor->vp.scroll_y =
-      clamp(scroll_y, 0, editor->layout.content_height - editor->vp.h);
+  if (editor->vp.w < editor->layout.content_width) {
+    editor->vp.scroll_x =
+        clamp(scroll_x, editor->vp.w - editor->layout.content_width, 0);
+  } else {
+    editor->vp.scroll_x = 0;
+  }
+  if (editor->vp.h < editor->layout.content_height) {
+    editor->vp.scroll_y =
+        clamp(scroll_y, 0, editor->layout.content_height - editor->vp.h);
+  } else {
+    editor->vp.scroll_y = 0;
+  }
+  // TODO(melvil): put somewhere else
   layout_update(&editor->layout, editor->doc, editor->wrap_enabled);
 }
 void editor_add_scroll(Editor *editor, f32 d_scroll_x, f32 d_scroll_y) {
@@ -747,11 +756,7 @@ int compute_frame(Application *app) {
 
     break;
   case INFO_GRAPHICS:
-    information_str =
-        str_format(temp.arena, "FPS: %f", debug_cursor.rect.x,
-                   debug_cursor.rect.y, cursor->offset,
-                   STR_FMT(prefered_col_str), debug_cursor.row->offset_start,
-                   debug_cursor.row->offset_end, debug_cursor.c, app->fps);
+    information_str = str_format(temp.arena, "FPS: %f", app->fps);
     information_color = (Vec4){.R = 0., .G = .5, .B = 0.5, .A = 1.};
     break;
   }
@@ -874,16 +879,14 @@ void on_mouse(Application *app, const PlatMouseEvent *ev) {
     mouse_y = ev->u.move.y;
     break;
   case PLAT_MOUSE_BUTTON: /* ev->u.button.button/action/mods */
-    if (ev->u.button.button == GLFW_MOUSE_BUTTON_1) {
-      printf("absolute %f %f\n", mouse_x, mouse_y);
+    if (ev->u.button.button == GLFW_MOUSE_BUTTON_1 &&
+        ev->u.button.action == GLFW_PRESS) {
       if (app->editor.vp.x <= mouse_x &&
           mouse_x <= app->editor.vp.x + app->editor.vp.w &&
           app->editor.vp.y <= mouse_y &&
           mouse_y <= app->editor.vp.y + app->editor.vp.h) {
-        printf("inside\n");
         f64 x = editor_mouse_x(mouse_x);
         f64 y = editor_mouse_y(mouse_y);
-        printf("absolute %f %f\n", x, y);
         cursor_place(&app->editor.cursor, &app->editor.layout, &app->editor.doc,
                      x, y);
       }
