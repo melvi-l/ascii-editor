@@ -12,6 +12,17 @@
 
 #define indices_count 6
 
+static f64 mouse_x = 0, mouse_y = 0;
+#define editor_mouse_x(__x) (__x) - app->editor.vp.x - app->editor.vp.scroll_x
+#define editor_mouse_y(__y) (__y) - app->editor.vp.y + app->editor.vp.scroll_y
+
+typedef enum InfoMode {
+  INFO_ROW,
+  INFO_SCROLL,
+  INFO_GRAPHICS,
+} InfoMode;
+static InfoMode info_mode = INFO_ROW;
+
 // @atlas
 static const stbtt_bakedchar *atlas_get_glyph(const Atlas *a, const char c) {
   return &a->glyphs[c - FIRST_CHAR];
@@ -306,6 +317,7 @@ void layout_update(Layout *layout, const Document doc, bool wrap_enabled) {
 
     px += advance;
   }
+  layout->content_height = py;
 }
 
 // TODO(melvil): maybe can be directly compute
@@ -345,7 +357,7 @@ void layout_quad_list(const Layout layout, const Document doc,
   for (u32 i = line_start; i < line_end; i++) {
     LayoutRow *row = &layout.rows[i];
 
-    f32 px = vp.x - vp.scroll_x;
+    f32 px = vp.x + vp.scroll_x;
     f32 row_top = vp.y + row->y - vp.scroll_y;
     f32 baseline_y = row_top + a.ascent;
     for (u32 offset = row->offset_start; offset < row->offset_end; offset++) {
@@ -363,8 +375,7 @@ void layout_quad_list(const Layout layout, const Document doc,
       f32 glyph_x = roundf(px + g->xoff);
       f32 glyph_y = roundf(baseline_y + g->yoff);
       // y culling should be already down -> visible line
-      if (glyph_x + advance < vp.x + vp.scroll_x ||
-          glyph_x > vp.x + vp.scroll_x + vp.w) {
+      if (glyph_x + advance < vp.x || glyph_x > vp.x + vp.w) {
         px += advance;
         continue;
       }
@@ -443,6 +454,27 @@ void cursor_move_up(Cursor *cursor, const Layout layout) {
   cursor->offset =
       min(previous->offset_start + relative_offset, previous->offset_end);
 }
+void cursor_place(Cursor *cursor, const Layout *layout, const Document *doc,
+                  f64 x, f64 y) {
+  LayoutRow *row;
+  for (u32 i = 0; i < layout->row_count; i++) {
+    row = &layout->rows[i];
+    if (row->y <= y && y <= row->y + layout->line_height) {
+      break;
+    }
+  }
+  u32 offset;
+  f32 px = 0;
+  for (offset = row->offset_start; offset < row->offset_end; offset++) {
+    char c = doc_get_char(*doc, offset);
+    f32 advance = layout_get_advance(*layout, c);
+    if (px <= x && x <= px + advance) {
+      break;
+    }
+    px += advance;
+  }
+  cursor->offset = offset;
+}
 static struct {
   Rect rect;
   LayoutRow *row;
@@ -464,7 +496,7 @@ void cursor_quad_list(Cursor *cursor, const Layout layout, const Document doc,
     x += layout_get_advance(layout, c);
   }
 
-  Rect cursor_rect = {.x = vp.x + x - vp.scroll_x,
+  Rect cursor_rect = {.x = vp.x + x + vp.scroll_x,
                       .y = vp.y + row->y - vp.scroll_y,
                       .w = 2,
                       .h = a.ascent - a.descent};
@@ -485,6 +517,20 @@ void cursor_quad_list(Cursor *cursor, const Layout layout, const Document doc,
   debug_cursor.rect = cursor_rect;
   debug_cursor.row = row;
   debug_cursor.c = doc_get_char(doc, cursor->offset);
+}
+
+//
+// @editor
+void editor_set_scroll(Editor *editor, f32 scroll_x, f32 scroll_y) {
+  editor->vp.scroll_x =
+      clamp(scroll_x, editor->vp.w - editor->layout.content_width, 0);
+  editor->vp.scroll_y =
+      clamp(scroll_y, 0, editor->layout.content_height - editor->vp.h);
+  layout_update(&editor->layout, editor->doc, editor->wrap_enabled);
+}
+void editor_add_scroll(Editor *editor, f32 d_scroll_x, f32 d_scroll_y) {
+  editor_set_scroll(editor, editor->vp.scroll_x + d_scroll_x,
+                    editor->vp.scroll_y + d_scroll_y);
 }
 
 //
@@ -603,6 +649,7 @@ int compute_frame(Application *app) {
 
   // text
   {
+    app->editor.wrap_enabled = false;
     app->editor.color = (Vec4){.R = 1., .G = 1., .B = 1., .A = 0.8f};
     layout_update(&app->editor.layout, app->editor.doc,
                   app->editor.wrap_enabled);
@@ -673,18 +720,47 @@ int compute_frame(Application *app) {
       (cursor->prefered_col_valid)
           ? str_format(temp.arena, "pref_col=%u; ", cursor->prefered_col)
           : S("");
-  Str information_str = str_format(
-      temp.arena,
-      "x=%.0f; y=%.0f; offset=%u;%.*s --- row=%u-%u; char=%u\nFPS: %f",
-      debug_cursor.rect.x, debug_cursor.rect.y, cursor->offset,
-      STR_FMT(prefered_col_str), debug_cursor.row->offset_start,
-      debug_cursor.row->offset_end, debug_cursor.c, app->fps);
-  render_command_execute(
-      &app->atlas,
-      (RenderCommand){.kind = RENDER_COMMAND_RECT,
-                      .bounding_box = information_outer,
-                      .rect = {.color = {.R = 1., .G = 0., .B = 0., .A = 1.}}},
-      &app->quad_list);
+  // row
+  Str information_str;
+  Vec4 information_color;
+  switch (info_mode) {
+  case INFO_ROW:
+    information_str = str_format(
+        temp.arena,
+        "ROW: x=%.0f; y=%.0f; offset=%u;%.*s --- row=%u-%u; char=%u\n",
+        debug_cursor.rect.x, debug_cursor.rect.y, cursor->offset,
+        STR_FMT(prefered_col_str), debug_cursor.row->offset_start,
+        debug_cursor.row->offset_end, debug_cursor.c, app->fps);
+    information_color = (Vec4){.R = 1., .G = 0., .B = 0., .A = 1.};
+    break;
+  case INFO_SCROLL:
+    information_str = str_format(
+        temp.arena,
+        "SCROLL: x=%.0f; y=%.0f;"
+        "MOUSE: x=%.0f; y=%.0f; "
+        "(editor --> x=%.0f; y=%.0f)\n"
+        "CONTENT: w=%.0f; h=%.0f;",
+        app->editor.vp.scroll_x, app->editor.vp.scroll_y, mouse_x, mouse_y,
+        editor_mouse_x(mouse_x), editor_mouse_y(mouse_y),
+        app->editor.layout.content_width, app->editor.layout.content_height);
+    information_color = (Vec4){.R = .5, .G = .5, .B = 0., .A = 1.};
+
+    break;
+  case INFO_GRAPHICS:
+    information_str =
+        str_format(temp.arena, "FPS: %f", debug_cursor.rect.x,
+                   debug_cursor.rect.y, cursor->offset,
+                   STR_FMT(prefered_col_str), debug_cursor.row->offset_start,
+                   debug_cursor.row->offset_end, debug_cursor.c, app->fps);
+    information_color = (Vec4){.R = 0., .G = .5, .B = 0.5, .A = 1.};
+    break;
+  }
+
+  render_command_execute(&app->atlas,
+                         (RenderCommand){.kind = RENDER_COMMAND_RECT,
+                                         .bounding_box = information_outer,
+                                         .rect = {.color = information_color}},
+                         &app->quad_list);
   render_command_execute(
       &app->atlas,
       (RenderCommand){.kind = RENDER_COMMAND_TEXT,
@@ -745,20 +821,42 @@ void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
   }
   Editor *editor = &app->editor;
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+    // cursor
     if (key == GLFW_KEY_UP) {
-      // compute_cursor(&app->editor_cursor, app->editor_text, -1, 0);
       cursor_move_up(&editor->cursor, editor->layout);
     }
     if (key == GLFW_KEY_DOWN) {
-      // compute_cursor(&app->editor_cursor, app->editor_text, 1, 0);
       cursor_move_down(&editor->cursor, editor->layout);
     }
-
     if (key == GLFW_KEY_LEFT) {
       cursor_move_left(&editor->cursor, editor->doc);
     }
     if (key == GLFW_KEY_RIGHT) {
       cursor_move_right(&editor->cursor, editor->doc);
+    }
+
+    // action
+    if (key == GLFW_KEY_0 && mods == GLFW_MOD_CONTROL) {
+      app->editor.vp.scroll_x = 0;
+      app->editor.vp.scroll_y = 0;
+    }
+
+    // information mode
+    if (key == GLFW_KEY_G && mods == GLFW_MOD_CONTROL) {
+      printf("mod_graphics\n");
+      info_mode = INFO_GRAPHICS;
+    }
+    if (key == GLFW_KEY_R && mods == GLFW_MOD_CONTROL) {
+      printf("mod_graphics\n");
+      info_mode = INFO_ROW;
+    }
+    if (key == GLFW_KEY_R && mods == GLFW_MOD_CONTROL) {
+      printf("mod_graphics\n");
+      info_mode = INFO_ROW;
+    }
+    if (key == GLFW_KEY_S && mods == GLFW_MOD_CONTROL) {
+      printf("mod_graphics\n");
+      info_mode = INFO_SCROLL;
     }
   }
 }
@@ -772,18 +870,28 @@ void on_char_input(Application *app, u32 c) {
 void on_mouse(Application *app, const PlatMouseEvent *ev) {
   switch (ev->kind) {
   case PLAT_MOUSE_MOVE: /* ev->u.move.x, .y */
+    mouse_x = ev->u.move.x;
+    mouse_y = ev->u.move.y;
     break;
   case PLAT_MOUSE_BUTTON: /* ev->u.button.button/action/mods */
+    if (ev->u.button.button == GLFW_MOUSE_BUTTON_1) {
+      printf("absolute %f %f\n", mouse_x, mouse_y);
+      if (app->editor.vp.x <= mouse_x &&
+          mouse_x <= app->editor.vp.x + app->editor.vp.w &&
+          app->editor.vp.y <= mouse_y &&
+          mouse_y <= app->editor.vp.y + app->editor.vp.h) {
+        printf("inside\n");
+        f64 x = editor_mouse_x(mouse_x);
+        f64 y = editor_mouse_y(mouse_y);
+        printf("absolute %f %f\n", x, y);
+        cursor_place(&app->editor.cursor, &app->editor.layout, &app->editor.doc,
+                     x, y);
+      }
+    }
     break;
   case PLAT_MOUSE_SCROLL:
-    printf("%f\n", (f32)ev->u.scroll.xoff);
-    printf("%f\n", (f32)ev->u.scroll.yoff);
-    app->editor.vp.scroll_x -= (f32)ev->u.scroll.xoff * SCROLL_FACTOR;
-    app->editor.vp.scroll_y -= (f32)ev->u.scroll.yoff * SCROLL_FACTOR;
-    printf("%f\n", app->editor.vp.scroll_x);
-    printf("%f\n", app->editor.vp.scroll_y);
-    layout_update(&app->editor.layout, app->editor.doc,
-                  app->editor.wrap_enabled);
+    editor_add_scroll(&app->editor, (f32)ev->u.scroll.xoff * SCROLL_FACTOR,
+                      -(f32)ev->u.scroll.yoff * SCROLL_FACTOR);
     break;
   case PLAT_MOUSE_ENTER: /* ev->u.enter.entered */
     break;
