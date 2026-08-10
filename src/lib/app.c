@@ -184,7 +184,7 @@ typedef enum CharacterClass {
   CHARACTER_WORD,
   CHARACTER_PUNCTUATION
 } CharacterClass;
-CharacterClass character_class(unsigned char byte) {
+CharacterClass character_class(char byte) {
   if (byte == ' ') {
     return CHARACTER_SPACE;
   }
@@ -406,12 +406,88 @@ void layout_quad_list(const Layout layout, const Document doc,
 
 //
 // @cursor
-void cursor_move_left(Cursor *cursor, const Document doc) {
-  cursor->offset = doc_previous_offset(doc, cursor->offset);
+typedef enum CursorHorizontalMovementKind {
+  MOVE_SIMPLE,
+  MOVE_WORD,
+  MOVE_LINE_START,
+  MOVE_LINE_END,
+} CursorHorizontalMovementKind;
+void cursor_move_left(Cursor *cursor, const Document doc,
+                      CursorHorizontalMovementKind movement_kind) {
+  u32 offset = cursor->offset;
+  switch (movement_kind) {
+  case MOVE_SIMPLE:
+    offset = doc_previous_offset(doc, offset);
+    break;
+  case MOVE_WORD: {
+    // skip whitespace
+    while (offset > 0) {
+      CharacterClass current_class =
+          character_class(doc_get_char(doc, offset - 1));
+      if (current_class != CHARACTER_SPACE &&
+          current_class != CHARACTER_LINE_END)
+        break;
+      offset = doc_previous_offset(doc, offset);
+    }
+    // skip current class
+    if (offset > 0) {
+      CharacterClass current_class =
+          character_class(doc_get_char(doc, offset - 1));
+      while (offset > 0 &&
+             character_class(doc_get_char(doc, offset - 1)) == current_class) {
+        offset = doc_previous_offset(doc, offset);
+      }
+    }
+    break;
+  }
+  case MOVE_LINE_START:
+    while (offset > 0 && doc_get_char(doc, offset - 1) != '\n')
+      offset = doc_previous_offset(doc, offset);
+    break;
+
+  case MOVE_LINE_END:
+    break;
+  }
+
+  cursor->offset = offset;
   cursor->prefered_col_valid = false;
 }
-void cursor_move_right(Cursor *cursor, const Document doc) {
-  cursor->offset = doc_next_offset(doc, cursor->offset);
+void cursor_move_right(Cursor *cursor, const Document doc,
+                       CursorHorizontalMovementKind movement_kind) {
+  u32 offset = cursor->offset;
+  u32 len = doc_get_length(doc);
+  switch (movement_kind) {
+  case MOVE_SIMPLE:
+    offset = doc_next_offset(doc, offset);
+    break;
+  case MOVE_WORD: {
+    // skip whitespace
+    while (offset < len) {
+      CharacterClass current_class = character_class(doc_get_char(doc, offset));
+      if (current_class != CHARACTER_SPACE &&
+          current_class != CHARACTER_LINE_END)
+        break;
+      offset = doc_next_offset(doc, offset);
+    }
+    // skip current class
+    if (offset < len) {
+      CharacterClass current_class = character_class(doc_get_char(doc, offset));
+      while (offset < len &&
+             character_class(doc_get_char(doc, offset)) == current_class) {
+        offset = doc_next_offset(doc, offset);
+      }
+    }
+    break;
+  }
+  case MOVE_LINE_END:
+    while (offset < len && doc_get_char(doc, offset) != '\n')
+      offset = doc_next_offset(doc, offset);
+    break;
+  case MOVE_LINE_START:
+    break;
+  }
+
+  cursor->offset = offset;
   cursor->prefered_col_valid = false;
 }
 void cursor_move_down(Cursor *cursor, const Layout layout) {
@@ -822,46 +898,53 @@ void on_resize(Application *app, u32 w, u32 h) {
 
 void on_key(Application *app, i32 key, i32 scancode, i32 action, i32 mods) {
   (void)scancode;
-  if (mods == GLFW_MOD_CONTROL) {
-  }
   Editor *editor = &app->editor;
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-    // cursor
-    if (key == GLFW_KEY_UP) {
-      cursor_move_up(&editor->cursor, editor->layout);
-    }
-    if (key == GLFW_KEY_DOWN) {
-      cursor_move_down(&editor->cursor, editor->layout);
-    }
-    if (key == GLFW_KEY_LEFT) {
-      cursor_move_left(&editor->cursor, editor->doc);
-    }
-    if (key == GLFW_KEY_RIGHT) {
-      cursor_move_right(&editor->cursor, editor->doc);
-    }
+    if (mods == GLFW_MOD_CONTROL) {
+      // cursor
+      if (key == GLFW_KEY_LEFT) {
+        cursor_move_left(&editor->cursor, editor->doc, MOVE_WORD);
+      }
+      if (key == GLFW_KEY_RIGHT) {
+        cursor_move_right(&editor->cursor, editor->doc, MOVE_WORD);
+      }
 
-    // action
-    if (key == GLFW_KEY_0 && mods == GLFW_MOD_CONTROL) {
-      app->editor.vp.scroll_x = 0;
-      app->editor.vp.scroll_y = 0;
-    }
+      // action
+      if (key == GLFW_KEY_0) {
+        app->editor.vp.scroll_x = 0;
+        app->editor.vp.scroll_y = 0;
+      }
 
-    // information mode
-    if (key == GLFW_KEY_G && mods == GLFW_MOD_CONTROL) {
-      printf("mod_graphics\n");
-      info_mode = INFO_GRAPHICS;
-    }
-    if (key == GLFW_KEY_R && mods == GLFW_MOD_CONTROL) {
-      printf("mod_graphics\n");
-      info_mode = INFO_ROW;
-    }
-    if (key == GLFW_KEY_R && mods == GLFW_MOD_CONTROL) {
-      printf("mod_graphics\n");
-      info_mode = INFO_ROW;
-    }
-    if (key == GLFW_KEY_S && mods == GLFW_MOD_CONTROL) {
-      printf("mod_graphics\n");
-      info_mode = INFO_SCROLL;
+      // information mode
+      if (key == GLFW_KEY_G) {
+        printf("mod_graphics\n");
+        info_mode = INFO_GRAPHICS;
+      }
+      if (key == GLFW_KEY_R) {
+        printf("mod_graphics\n");
+        info_mode = INFO_ROW;
+      }
+      if (key == GLFW_KEY_R) {
+        printf("mod_graphics\n");
+        info_mode = INFO_ROW;
+      }
+      if (key == GLFW_KEY_S) {
+        printf("mod_graphics\n");
+        info_mode = INFO_SCROLL;
+      }
+    } else {
+      if (key == GLFW_KEY_UP) {
+        cursor_move_up(&editor->cursor, editor->layout);
+      }
+      if (key == GLFW_KEY_DOWN) {
+        cursor_move_down(&editor->cursor, editor->layout);
+      }
+      if (key == GLFW_KEY_LEFT) {
+        cursor_move_left(&editor->cursor, editor->doc, MOVE_SIMPLE);
+      }
+      if (key == GLFW_KEY_RIGHT) {
+        cursor_move_right(&editor->cursor, editor->doc, MOVE_SIMPLE);
+      }
     }
   }
 }
